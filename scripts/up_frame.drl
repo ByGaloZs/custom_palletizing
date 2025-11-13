@@ -1,0 +1,66 @@
+# ========== Mini test: Lifter + compensación en frame de pallet ==========
+# Flujo:
+#   1) Mover a POS_INI respecto al frame FRAME_ID.
+#   2) Sube el lifter físicamente +DZ_LIFTER (tú lo mandas desde fuera).
+#   3) El programa "baja" el frame FRAME_ID en -DZ_LIFTER (compensación).
+#   4) Mover a POS_FIN respecto al mismo frame ya compensado.
+# ==========================================================================
+
+FRAME_ID    = 198      # ID del frame que representa el pallet
+DZ_LIFTER   = 350.0    # Cuánto sube el lifter físicamente (+ mm)
+
+# ==> AQUÍ vas a pegar las posiciones que me quieras pasar:
+#     (ejemplo genérico, reemplázalas por tus posx reales)
+POS_INI = posx(593.000, 90.000, 717.000, -180.0, 0.0, 180.0, DR_FIX_XYZ)
+POS_FIN = posx(593.000, 90.000, 717.000, -180.0, 0.0, 180.0, DR_FIX_XYZ)
+
+def leer_frame_world(fid):
+    """Devuelve la Z del frame fid respecto a WORLD (solo para visualizar)."""
+    pose, ref = get_user_cart_coord(fid)
+    pose_w = trans(pose, [0,0,0,0,0,0], ref, DR_WORLD)
+    return pose_w[2]
+
+def compensar_frame_pallet(fid, dz_lifter):
+    """
+    Compensa el lifter en el frame del pallet:
+    Si el lifter sube +DZ, el frame debe bajar -DZ respecto a la BASE.
+    """
+    pose, ref = get_user_cart_coord(fid)
+
+    # Restamos DZ en Z: BASE subió +DZ, así que el pallet, visto desde la BASE,
+    # debe bajar -DZ
+    new_pose = posx(pose[0],
+                    pose[1],
+                    pose[2] - dz_lifter,   # <- compensación clave
+                    pose[3],
+                    pose[4],
+                    pose[5],
+                    DR_FIX_XYZ)
+
+    overwrite_user_cart_coord(fid, new_pose, ref, DR_TEMPORARY)
+
+def main():
+    # Info inicial del frame
+    z_before = leer_frame_world(FRAME_ID)
+    tp_popup("FRAME %d antes: Z_world = %.1f mm" % (FRAME_ID, z_before))
+
+    # 1) Mover a la primera posición antes del lifter
+    set_ref_coord(FRAME_ID)
+    movel(POS_INI, v=200, a=200)
+
+    # 2) Aquí SUBE el lifter físicamente (fuera del programa)
+    tp_popup("Sube el lifter físicamente +%.1f mm, luego pulsa OK" % DZ_LIFTER)
+    # Si quieres puedes meter un delay con wait(2.0), pero lo ideal es el popup.
+
+    # 3) Compensar ese desplazamiento en el frame del pallet
+    compensar_frame_pallet(FRAME_ID, DZ_LIFTER)
+
+    z_after = leer_frame_world(FRAME_ID)
+    tp_popup("FRAME %d después de compensar: Z_world = %.1f mm" % (FRAME_ID, z_after))
+
+    # 4) Mover a la segunda posición respecto al MISMO frame ya compensado
+    set_ref_coord(FRAME_ID)
+    movel(POS_FIN, v=200, a=200)
+
+# Ejecutar
+main()
