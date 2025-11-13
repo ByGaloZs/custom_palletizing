@@ -1,0 +1,778 @@
+# =====================================================================
+# Palletizing Script (Doosan DRL)
+# =====================================================================
+
+# ---------------------- frames ----------------------
+# ID de los frames enseñados en el controlador
+conv_frame = 101   # Frame del conveyor (pick)
+left_frame = 102   # Frame del pallet izquierdo
+right_frame = 103  # Frame del pallet derecho
+
+# ---------------------- parámetros globales ---------
+# Modo de orientación: FIX XYZ, es decir RX, RY, RZ fijos (no ELR).
+rot_mode = DR_FIX_XYZ
+
+# Offsets en Z para APPROACH y RETRACT con respecto al PLACE
+dz_app = 150.0     # Distancia en Z para aproximación (APP)
+dz_ret = 200.0     # Distancia en Z para retract (RET)
+
+# Offsets en X/Y sólo para APPROACH de PLACE (personalizables)
+dx_app = 0.0       # Offset en X del APPROACH respecto al slot
+dy_app = 0.0       # Offset en Y del APPROACH respecto al slot
+
+# ---------------------- velocidades -----------------
+# Velocidades y aceleraciones de joint (vj/aj) y lineales (vl/al)
+# Separa en "rápido" y "lento" para pick/place.
+vj_fast = 80;  aj_fast = 80
+vj_slow = 60;  aj_slow = 60
+vl_fast = 1000; al_fast = 1000
+vl_slow = 800;  al_slow = 800
+
+# ---------------------- poses joint auxiliares ------
+# Home general del robot (posición segura de referencia)
+home = posj(-90.00, 0.00, 90.00, 0.00, 90.00, 90.00)
+
+# Posiciones "up" sobre zonas clave:
+up_conv  = posj(-57.60, 8.72, 80.72, 0.00, 90.55, 122.39)  # Hub sobre conveyor
+up_left  = posj(4.58, -8.86, 98.00, 0.00, 90.85, 94.58)    # Hub sobre pallet izquierdo
+up_right = posj(-175.42, -8.86, 98.01, 0.00, 90.86, 94.58) # Hub sobre pallet derecho
+
+# ---------------------- I/O gripper -----------------
+# Definición de las salidas digitales que controlan el gripper
+do_a = 1  # DO para "mitad A" o una vía del gripper
+do_b = 2  # DO para "mitad B" o la otra vía del gripper
+
+# Funciones de control del gripper (FULL / HALF A / HALF B / RELEASE)
+def grip_full():
+    # Activa ambas salidas -> agarra la caja completa
+    set_digital_output(do_a, ON)
+    set_digital_output(do_b, ON)
+    wait(0.2)
+
+def grip_half_a():
+    # Sólo activa 'A' -> agarra media caja tipo A
+    set_digital_output(do_a, ON)
+    set_digital_output(do_b, OFF)
+    wait(0.2)
+
+def grip_half_b():
+    # Sólo activa 'B' -> agarra media caja tipo B
+    set_digital_output(do_a, OFF)
+    set_digital_output(do_b, ON)
+    wait(0.2)
+
+def rel_full():
+    # Libera ambas mitades -> suelta caja completa
+    set_digital_output(do_a, OFF)
+    set_digital_output(do_b, OFF)
+    wait(0.2)
+
+def rel_half_a():
+    # Libera sólo la mitad A
+    set_digital_output(do_a, OFF)
+    wait(0.15)
+
+def rel_half_b():
+    # Libera sólo la mitad B
+    set_digital_output(do_b, OFF)
+    wait(0.15)
+
+# ---------------------- I/O lifter ------------------
+# Salidas para controlar un lifter externo (aún no integradas en la lógica principal)
+do_lift_up   = 3
+do_lift_down = 4
+t_up = 3.0   # Tiempo para subir el lifter
+t_dn = 3.0   # Tiempo para bajar el lifter
+
+def lifter_up():
+    # Enciende la salida de subir, espera, y apaga
+    set_digital_output(do_lift_up, ON)
+    wait(t_up)
+    set_digital_output(do_lift_up, OFF)
+
+def lifter_down():
+    # Enciende la salida de bajar, espera, y apaga
+    set_digital_output(do_lift_down, ON)
+    wait(t_dn)
+    set_digital_output(do_lift_down, OFF)
+
+# ---------------------- datos PLACE (por capas) -----
+# left_layers y right_layers:
+#   Estructura: lista de 5 LAYERS (0..4), cada layer contiene 9 slots (0..8)
+#   Cada entrada: (X, Y, Z, RX, RY, RZ)
+#   Se interpretan en el frame del pallet correspondiente (left_frame o right_frame).
+
+left_layers = [
+    # LAYER 1 (Left)
+    [
+        (593.0, 90.0, 235.0, -180.0, 0.0, -180.0),
+        (593.0, 265.0, 235.0, -180.0, 0.0, -180.0),
+        (593.0, 440.0, 235.0, -180.0, 0.0, -180.0),
+        (593.0, 615.0, 235.0, -180.0, 0.0, -180.0),
+        (593.0, 790.0, 235.0, -180.0, 0.0, -180.0),
+        (593.0, 965.0, 235.0, -180.0, 0.0, -180.0),
+        (593.0, 1140.0,235.0, -180.0, 0.0, -180.0),
+        (105.0, 402.0,235.0, -180.0, 0.0, 90.0),
+        (105.0, 1212.0,235.0, -180.0, 0.0, 90.0)
+    ],
+    # LAYER 2 (Left)
+    [
+        (915.0, 812.0,356.0, -180.0, 0.0, 90.0),
+        (915.0, 407.0,356.0, -180.0, 0.0, 90.0),
+        (418.0, 90.0, 356.0, -180.0, 0.0, -180.0),
+        (418.0, 265.0,356.0, -180.0, 0.0, 180.0),
+        (418.0, 440.0,356.0, -180.0, 0.0, -180.0),
+        (418.0, 615.0,356.0, -180.0, 0.0, -180.0),
+        (418.0, 790.0,356.0, -180.0, 0.0, -180.0),
+        (418.0, 965.0,356.0, -180.0, 0.0, -180.0),
+        (418.0, 1140.0,356.0, -180.0, 0.0, -180.0)
+    ],
+    # LAYER 3 (Left)
+    [
+        (593.0, 90.0, 477.0, -180.0, 0.0, -180.0),
+        (593.0, 265.0,477.0, -180.0, 0.0, -180.0),
+        (593.0, 440.0,477.0, -180.0, 0.0, -180.0),
+        (593.0, 615.0,477.0, -180.0, 0.0, -180.0),
+        (593.0, 790.0,477.0, -180.0, 0.0, -180.0),
+        (593.0, 965.0,477.0, -180.0, 0.0, -180.0),
+        (593.0, 1140.0,477.0, -180.0, 0.0, -180.0),
+        (105.0, 402.0,477.0, -180.0, 0.0, 90.0),
+        (105.0, 1212.0,477.0, -180.0, 0.0, 90.0)
+    ],
+    # LAYER 4 (Left)
+    [
+        (915.0, 812.0,597.0, -180.0, 0.0, 90.0),
+        (915.0, 407.0,597.0, -180.0, 0.0, 90.0),
+        (418.0, 90.0, 597.0, -180.0, 0.0, -180.0),
+        (418.0, 265.0,597.0, -180.0, 0.0, 180.0),
+        (418.0, 440.0,597.0, -180.0, 0.0, -180.0),
+        (418.0, 615.0,597.0, -180.0, 0.0, -180.0),
+        (418.0, 790.0,597.0, -180.0, 0.0, -180.0),
+        (418.0, 965.0,597.0, -180.0, 0.0, -180.0),
+        (418.0, 1140.0,597.0, -180.0, 0.0, -180.0)
+    ],
+    # LAYER 5 (Left)
+    [
+        (593.0, 90.0, 717.0, -180.0, 0.0, -180.0),
+        (593.0, 265.0,717.0, -180.0, 0.0, -180.0),
+        (593.0, 440.0,717.0, -180.0, 0.0, -180.0),
+        (593.0, 615.0,717.0, -180.0, 0.0, -180.0),
+        (593.0, 790.0,717.0, -180.0, 0.0, -180.0),
+        (593.0, 965.0,717.0, -180.0, 0.0, -180.0),
+        (593.0, 1140.0,717.0, -180.0, 0.0, -180.0),
+        (105.0, 402.0,717.0, -180.0, 0.0, 90.0),
+        (105.0, 1212.0,717.0, -180.0, 0.0, 90.0)
+    ]
+]
+
+right_layers = [
+    # LAYER 1 (Right)
+    [
+        (438.0, 1130.0,235.0, -180.0, 0.0, 0.0),
+        (438.0, 955.0, 235.0, -180.0, 0.0, 0.0),
+        (438.0, 780.0, 235.0, -180.0, 0.0, 0.0),
+        (438.0, 605.0, 235.0, -180.0, 0.0, 0.0),
+        (438.0, 430.0, 235.0, -180.0, 0.0, 0.0),
+        (438.0, 255.0, 235.0, -180.0, 0.0, 0.0),
+        (438.0, 80.0,  235.0, -180.0, 0.0, 0.0),
+        (925.0, 403.0, 235.0, -180.0, 0.0, -90.0),
+        (926.5, 1213.0,235.0, -180.0, 0.0, -90.0)
+    ],
+    # LAYER 2 (Right)
+    [
+        (115.0, 808.0,355.5, -180.0, 0.0, -90.0),
+        (115.0, 403.0,355.5, -180.0, 0.0, -90.0),
+        (612.0, 1130.0,355.5, -180.0, 0.0, 0.0),
+        (612.0, 955.0, 355.5, 180.0, 0.0, 0.0),
+        (612.0, 780.0, 355.5, -180.0, 0.0, 0.0),
+        (612.0, 605.0, 355.5, -180.0, 0.0, 0.0),
+        (612.0, 430.0, 355.5, 180.0, 0.0, 0.0),
+        (612.0, 255.0, 355.5, 180.0, 0.0, 0.0),
+        (612.0, 80.0,  355.5, -180.0, 0.0, 0.0)
+    ],
+    # LAYER 3 (Right)
+    [
+        (438.0, 1130.0,475.0, -180.0, 0.0, 0.0),
+        (438.0, 955.0, 475.0, -180.0, 0.0, 0.0),
+        (438.0, 780.0, 475.0, -180.0, 0.0, 0.0),
+        (438.0, 605.0, 475.0, -180.0, 0.0, 0.0),
+        (438.0, 430.0, 475.0, -180.0, 0.0, 0.0),
+        (438.0, 255.0, 475.0, -180.0, 0.0, 0.0),
+        (438.0, 80.0,  475.0, -180.0, 0.0, 0.0),
+        (925.0, 403.0, 475.0, -180.0, 0.0, -90.0),
+        (926.5, 1213.0,475.0, -180.0, 0.0, -90.0)
+    ],
+    # LAYER 4 (Right)
+    [
+        (115.0, 808.0,595.5, -180.0, 0.0, -90.0),
+        (115.0, 403.0,595.5, -180.0, 0.0, -90.0),
+        (612.0, 1130.0,595.5, -180.0, 0.0, 0.0),
+        (612.0, 955.0, 595.5, 180.0, 0.0, 0.0),
+        (612.0, 780.0, 595.5, -180.0, 0.0, 0.0),
+        (612.0, 605.0, 595.5, -180.0, 0.0, 0.0),
+        (612.0, 430.0, 595.5, 180.0, 0.0, 0.0),
+        (612.0, 255.0, 595.5, 180.0, 0.0, 0.0),
+        (612.0, 80.0,  595.5, -180.0, 0.0, 0.0)
+    ],
+    # LAYER 5 (Right)
+    [
+        (438.0, 1130.0,715.0, -180.0, 0.0, 0.0),
+        (438.0, 955.0, 715.0, -180.0, 0.0, 0.0),
+        (438.0, 780.0, 715.0, -180.0, 0.0, 0.0),
+        (438.0, 605.0, 715.0, -180.0, 0.0, 0.0),
+        (438.0, 430.0, 715.0, -180.0, 0.0, 0.0),
+        (438.0, 255.0, 715.0, -180.0, 0.0, 0.0),
+        (438.0, 80.0,  715.0, -180.0, 0.0, 0.0),
+        (925.0, 403.0, 715.0, -180.0, 0.0, -90.0),
+        (926.5, 1213.0,715.0, -180.0, 0.0, -90.0)
+    ]
+]
+
+# ---------------------- half plan (A→B) -------------
+# Plan de mitades:
+# Cada tupla: (layer_origen, slot_origen, layer_destino_halfB, slot_destino_halfB)
+# Ejemplo (0,8,1,0):
+#   - Half-A se coloca en L1 S9 (layer=0, slot=8)
+#   - Half-B se coloca en L2 S1 (layer=1, slot=0)
+half_plan_left  = [(0,8,1,0), (2,8,3,0)]
+half_plan_right = [(0,8,1,0), (2,8,3,0)]
+
+# ---------------------- mid por capa (dos variantes) --------
+# mid_left_a / mid_right_a:
+#   Joint targets intermedios (MidA) por capa (0..4) para cada lado.
+mid_left_a = [
+    posj(0.72, 58.86,107.11, 0.00,14.02, 0.72),
+    posj(0.72, 49.68,109.40, 0.00,20.90, 0.72),
+    posj(0.72, 40.89,109.82, 0.00,29.27, 0.72),
+    posj(0.72, 32.94,108.37, 0.00,38.67, 0.72),
+    posj(0.72, 26.11,105.11, 0.00,48.77, 0.72)
+]
+
+mid_right_a = [
+    posj(-181.11,58.26,110.56,0.00,11.16,-1.11),
+    posj(-181.11,48.75,112.90,0.00,18.33,-1.11),
+    posj(-181.11,39.58,113.33,0.00,27.07,-1.11),
+    posj(-181.11,31.26,111.85,0.00,36.88,-1.11),
+    posj(-181.11,24.10,108.52,0.00,47.36,-1.11)
+]
+
+def _rot_j6(j, delta):
+    # Devuelve un nuevo posj con el mismo J1..J5 y J6 rotado en "delta"
+    return posj(j[0], j[1], j[2], j[3], j[4], j[5] + delta)
+
+# MidB = MidA con J6 rotado +90°
+mid_left_b  = [ _rot_j6(j, 90.0) for j in mid_left_a  ]
+mid_right_b = [ _rot_j6(j, 90.0) for j in mid_right_a ]
+
+# ---------------------- mapa MidB configurable -------------
+# midB_map_left/right contiene (layer,slot) en 0-based que usarán MidB.
+# Todo lo demás usa MidA.
+# Regla:
+#  L1,3,5: slot 1 y 9 -> MidB, 2..8 MidA
+#  L2,4:   slots 1,2 -> MidB, 3..9 MidA
+midB_map_left = [
+    (0,0), (0,8),
+    (1,0), (1,1),
+    (2,0), (2,8),
+    (3,0), (3,1),
+    (4,0), (4,8)
+]
+# Por defecto el Right usa el mismo patrón; se puede cambiar después si se desea.
+midB_map_right = list(midB_map_left)
+
+# =====================================================================
+# utilidades geométricas
+# =====================================================================
+def mk_off(dz):
+    # Crea una posx de offset en Z (relativo) con orientaciones 0
+    return posx(0.0, 0.0, dz, 0.0, 0.0, 0.0, rot_mode)
+
+def mk_off_app():
+    # Offset sólo para APPROACH de PLACE: (dx_app, dy_app, dz_app)
+    return posx(dx_app, dy_app, dz_app, 0.0, 0.0, 0.0, rot_mode)
+
+def get_place(side, layer, slot):
+    """
+    Devuelve:
+      - La pose posx del PLACE (en el frame del pallet)
+      - El ID de frame (left_frame/right_frame)
+    """
+    if side == "L":
+        p = left_layers[layer][slot]
+        return posx(p[0], p[1], p[2], p[3], p[4], p[5], rot_mode), left_frame
+    else:
+        p = right_layers[layer][slot]
+        return posx(p[0], p[1], p[2], p[3], p[4], p[5], rot_mode), right_frame
+
+def get_app(side, layer, slot):
+    """
+    Calcula la pose de APPROACH a partir del PLACE:
+    PLACE + (dx_app, dy_app, dz_app) en el frame del pallet.
+    """
+    pl, rf = get_place(side, layer, slot)
+    return trans(pos=pl, delta=mk_off_app(), ref=rf, ref_out=rf), rf
+
+def get_ret(side, layer, slot):
+    """
+    Calcula la pose de RETRACT a partir del PLACE:
+    PLACE + (0, 0, dz_ret) en el frame del pallet.
+    """
+    pl, rf = get_place(side, layer, slot)
+    return trans(pos=pl, delta=mk_off(dz_ret), ref=rf, ref_out=rf), rf
+
+def find_half(side, layer, slot):
+    """
+    Busca en half_plan_left/right si (layer,slot) es un ORIGEN Half-A.
+    Devuelve:
+      (True, dl, ds)  si es origen Half y (dl,ds) es el destino Half-B
+      (False, 0, 0)   si no es origen Half
+    """
+    plan = half_plan_left if side == "L" else half_plan_right
+    for t in plan:
+        if t[0] == layer and t[1] == slot:
+            return True, t[2], t[3]
+    return False, 0, 0
+
+def is_half_destination(side, layer, slot):
+    """
+    Indica si (layer,slot) es un DESTINO Half-B.
+    Se usa para:
+      - Saltar esos slots en la corrida normal (run_from).
+      - Reconocer cuando el usuario arranca justo en un Half-B.
+    """
+    plan = half_plan_left if side == "L" else half_plan_right
+    for t in plan:
+        if t[2] == layer and t[3] == slot:
+            return True
+    return False
+
+# --------- selección de mid A/B según tabla ----------
+def _is_group_b(side, layer, slot):
+    """
+    Determina si este (layer,slot) debe usar MidB (rotado +90° en J6)
+    según midB_map_left/right.
+    """
+    if side == "L":
+        return (layer, slot) in midB_map_left
+    else:
+        return (layer, slot) in midB_map_right
+
+def get_mid(side, layer, slot):
+    """
+    Devuelve el joint target Mid adecuado (A o B) según:
+      - Lado (Left/Right)
+      - Capa (layer)
+      - Slot
+    Si la capa excede el tamaño de la lista de mids, devuelve None.
+    """
+    use_b = _is_group_b(side, layer, slot)
+    if side == "L":
+        if use_b:
+            return mid_left_b[layer]  if layer < len(mid_left_b)  else None
+        else:
+            return mid_left_a[layer]  if layer < len(mid_left_a)  else None
+    else:
+        if use_b:
+            return mid_right_b[layer] if layer < len(mid_right_b) else None
+        else:
+            return mid_right_a[layer] if layer < len(mid_right_a) else None
+
+# =====================================================================
+# pick desde conveyor (según modo de agarre)
+# =====================================================================
+# Pose cartesiana del pick en el conveyor (en conv_frame)
+pick_pose = posx(402.00, -89.50, 320.00, 180.00, 0.00, 0.0, rot_mode)
+
+def do_pick(mode):
+    """
+    Secuencia completa de pick:
+      - Va a up_conv
+      - Baja a APPROACH (pick_app)
+      - Baja a PICK (pick_pose)
+      - Activa el gripper según el modo (full/half_a/half_b)
+      - Sube a RETRACT (pick_ret)
+      - Regresa a up_conv
+    """
+    # Ir al hub sobre el conveyor
+    movej(pos=up_conv, v=vj_fast, a=aj_fast, r=25)
+
+    # Calcular APPROACH, PICK y RETRACT (referenciados a conv_frame)
+    a, _ = get_pick_app()
+    p, _ = get_pick()
+    r, _ = get_pick_ret()
+
+    # Aproximación lenta en línea
+    movel(pos=a, v=vl_slow, a=al_slow, ref=conv_frame)
+    # Bajar al pick
+    movel(pos=p, v=vl_slow, a=al_slow, ref=conv_frame)
+
+    # Selección del modo de agarre
+    if mode == "full":
+        grip_full()
+    elif mode == "half_a":
+        grip_half_a()
+    elif mode == "half_b":
+        grip_half_b()
+
+    # Retiro en línea
+    movel(pos=r, v=vl_slow, a=al_slow, ref=conv_frame)
+
+    # Volver al hub del conveyor
+    movej(pos=up_conv, v=vj_fast, a=aj_fast, r=25)
+
+def get_pick():
+    # Devuelve la pose de pick y el frame del conveyor
+    return pick_pose, conv_frame
+
+def get_pick_app():
+    # APPROACH del pick: pick_pose + dz_app en Z del conveyor
+    return trans(pos=pick_pose, delta=mk_off(dz_app), ref=conv_frame, ref_out=conv_frame), conv_frame
+
+def get_pick_ret():
+    # RETRACT del pick: pick_pose + dz_ret en Z del conveyor
+    return trans(pos=pick_pose, delta=mk_off(dz_ret), ref=conv_frame, ref_out=conv_frame), conv_frame
+
+# =====================================================================
+# place (full / half)
+# =====================================================================
+def do_place(side, layer, slot, rtype):
+    """
+    Secuencia completa de place en un slot:
+      - Mueve al hub del lado (up_left/up_right)
+      - Pasa por MidA o MidB (si está definido para esa capa/slot)
+      - Va al APPROACH (con offsets X/Y/Z)
+      - Baja al PLACE
+      - Suelta tipo rtype (full/half_a/half_b)
+      - Sube a RETRACT
+      - Regresa al hub del lado
+    """
+    # Seleccionar hub según lado
+    up = up_left if side == "L" else up_right
+
+    # Place, Approach y Retract en el frame del pallet
+    pl, rp = get_place(side, layer, slot)  # Pose de place y frame
+    ap, ra = get_app(side, layer, slot)    # Pose de approach y frame
+    rt, rr = get_ret(side, layer, slot)    # Pose de retract y frame
+
+    # Ir al hub del pallet
+    movej(pos=up, v=vj_fast, a=aj_fast, r=0)
+
+    # MidA/MidB (si la capa tiene mid definida)
+    use_b = _is_group_b(side, layer, slot)
+    m = get_mid(side, layer, slot)
+    if not (m == None):
+        if use_b:
+            tp_log("MidB en " + side + " L" + str(layer+1) + " S" + str(slot+1))
+        else:
+            tp_log("MidA en " + side + " L" + str(layer+1) + " S" + str(slot+1))
+        movej(pos=m, v=vj_fast, a=aj_fast, r=25)
+
+    # Aproximación al slot (con offsets dx_app/dy_app/dz_app)
+    movel(pos=ap, v=vl_slow, a=al_slow, ref=ra)
+    # Bajar a la posición exacta de PLACE
+    movel(pos=pl, v=vl_slow, a=al_slow, ref=rp)
+
+    # Liberar según el tipo de pieza (full / half_a / half_b)
+    if   rtype == "full":
+        rel_full()
+    elif rtype == "half_a":
+        rel_half_a()
+    elif rtype == "half_b":
+        rel_half_b()
+
+    # Retiro en línea
+    movel(pos=rt, v=vl_slow, a=al_slow, ref=rr)
+    # Volver al hub del pallet
+    movej(pos=up, v=vj_fast, a=aj_fast, r=25)
+
+# Half-B prellenados al arrancar (para no repetirlos luego si ya estaban llenos)
+# Contiene tuplas (side, layer, slot) que ya recibieron un Half-B.
+_halfB_filled = set()
+
+def do_half(side, layer, slot, is_half, dl, ds):
+    """
+    Maneja la lógica de Half-A / Half-B para un slot:
+      - Si is_half == True:
+          * SLOT actual es origen: se coloca Half-A ahí.
+          * Luego se coloca Half-B en (dl,ds), si el destino es válido.
+      - Si is_half == False:
+          * SLOT normal: se hace place full.
+    """
+    if is_half:
+        # Mensaje: estamos colocando Half-A en el origen
+        tp_log("Half-A: L" + str(layer+1) + " S" + str(slot+1) +
+               " → L" + str(dl+1) + " S" + str(ds+1))
+
+        # Coloca Half-A en el slot origen
+        do_place(side, layer, slot, "half_a")
+
+        # Si el destino ya fue marcado como lleno antes, no repetir Half-B
+        if (side, dl, ds) in _halfB_filled:
+            tp_log("Half-B destino ya estaba lleno. Omitiendo: L" +
+                   str(dl+1) + " S" + str(ds+1))
+            return
+
+        # Verificar que el destino existe en la tabla de layers/slots
+        if side == "L":
+            ok = (dl < len(left_layers) and ds < len(left_layers[dl]))
+        else:
+            ok = (dl < len(right_layers) and ds < len(right_layers[dl]))
+
+        if ok:
+            # Movernos al hub del lado antes de ir al destino Half-B
+            movej(pos=(up_right if side == "R" else up_left),
+                  v=vj_slow, a=aj_slow, r=0)
+            tp_log("Colocando Half-B en destino L" +
+                   str(dl+1) + " S" + str(ds+1))
+
+            # Coloca Half-B en el destino
+            do_place(side, dl, ds, "half_b")
+
+            # Marcar destino como lleno (ya no repetir Half-B ahí)
+            _halfB_filled.add((side, dl, ds))
+        else:
+            # Fuera de rango → sólo se hace Half-A
+            tp_log("Destino Half-B fuera de rango. Solo Half-A.")
+    else:
+        # Slot normal: caja completa
+        do_place(side, layer, slot, "full")
+
+# =====================================================================
+# tp helpers (teach pendant)
+# =====================================================================
+def clamp(val, lo, hi):
+    # Limita 'val' al rango [lo, hi]
+    if val < lo: return lo
+    if val > hi: return hi
+    return val
+
+def ask_side():
+    """
+    Pide al operador el lado (L/R).
+    Repite hasta que la entrada sea válida.
+    """
+    s = tp_get_user_input("Lado L/R", DR_VAR_STR)
+    if s == "L" or s == "l": return "L"
+    if s == "R" or s == "r": return "R"
+    tp_log("Entrada invalida, usa L o R")
+    return ask_side()
+
+def ask_layer(side):
+    """
+    Pide la cama (1..N) según el lado, la convierte a índice 0-based.
+    """
+    n = len(left_layers) if side == "L" else len(right_layers)
+    v = tp_get_user_input("Cama 1.." + str(n), DR_VAR_INT)
+    v = clamp(v, 1, n)
+    return v - 1
+
+def ask_slot(side, layer):
+    """
+    Pide el slot (1..N) de la cama seleccionada, lo convierte a índice 0-based.
+    """
+    n = len(left_layers[layer]) if side == "L" else len(right_layers[layer])
+    v = tp_get_user_input("Slot 1.." + str(n), DR_VAR_INT)
+    v = clamp(v, 1, n)
+    return v - 1
+
+# =====================================================================
+# helpers para lecturas posx/posj y safe_home
+# =====================================================================
+# Centro X aproximado de cada pallet para decidir qué hub usar
+_left_cx  = 250.0
+_right_cx = -1266.0
+
+def _pal_hub(cx):
+    """
+    Dado cx (X actual del TCP en base), decide a qué hub de pallet ir:
+      - up_left  si está más cerca de _left_cx
+      - up_right si está más cerca de _right_cx
+    """
+    return up_left if abs(cx - _left_cx) <= abs(cx - _right_cx) else up_right
+
+def _get_posx_only():
+    """
+    Obtiene la pose cartesiana actual (posx).
+    Algunos firmwares devuelven (pose,ref), por eso se hace el try/except.
+    """
+    res = get_current_posx()
+    try:
+        pose, _ = res
+        return pose
+    except:
+        return res
+
+def _get_posj_only():
+    """
+    Obtiene la pose articular actual (posj).
+    Algunos firmwares devuelven (joints,ref), por eso se hace el try/except.
+    """
+    res = get_current_posj()
+    try:
+        j, _ = res
+        return j
+    except:
+        return res
+
+# Tolerancia para considerar que está en HOME (en grados)
+tol_j_deg = 2.0
+
+def _is_home():
+    """
+    Comprueba si la posición actual de joints está cerca de 'home'.
+    """
+    jcur = _get_posj_only()
+    return (abs(jcur[0] - home[0]) <= tol_j_deg and
+            abs(jcur[1] - home[1]) <= tol_j_deg and
+            abs(jcur[2] - home[2]) <= tol_j_deg and
+            abs(jcur[3] - home[3]) <= tol_j_deg and
+            abs(jcur[4] - home[4]) <= tol_j_deg and
+            abs(jcur[5] - home[5]) <= tol_j_deg)
+
+# ------------------- safe home logic (cuadrantes) -------------------
+def safe_home():
+    """
+    Lógica de retorno seguro a HOME:
+      - Si ya está en home, no hace nada.
+      - Sube 100mm en Z relativo al frame base (para alejarse de obstáculos).
+      - Si Y > 0 (pallets): va al hub de pallet más cercano (left/right).
+      - Si Y <= 0 (conveyor): va a up_conv.
+      - Desde el hub, va a 'home'.
+    """
+    if _is_home():
+        return
+
+    # Obtener pose actual
+    cur = _get_posx_only()
+    cx, cy, cz = cur[0], cur[1], cur[2]
+
+    # Subir en Z 100mm en base (movimiento relativo)
+    pz = posx(0, 0, 100, 0, 0, 0, rot_mode)
+    movel(pz, time=2, ref=DR_BASE, mod=DR_MV_MOD_REL)
+
+    # Decidir hub según el cuadrante (Y positiva => pallets)
+    if cy > 0:
+        movej(pos=_pal_hub(cx), v=vj_slow, a=aj_slow, r=10)
+    else:
+        movej(pos=up_conv, v=vj_slow, a=aj_slow, r=10)
+
+    # Ir finalmente al home
+    movej(pos=home, v=vj_slow, a=aj_slow, r=10)
+
+# =====================================================================
+# rutina: ejecutar desde (layer,slot) hasta acabar el lado
+# =====================================================================
+def run_from(side, start_layer, start_slot):
+    """
+    Ejecuta la secuencia completa de paletizado desde (start_layer,start_slot)
+    hasta completar todas las capas y slots del lado indicado.
+    Respeta la lógica:
+      - Saltar destinos Half-B (is_half_destination).
+      - Ejecutar Half-A/B donde aplique (find_half + do_half).
+    """
+    layers = left_layers if side == "L" else right_layers
+    n_layers = len(layers)
+    layer = start_layer
+
+    while layer < n_layers:
+        n_slots = len(layers[layer])
+        # En la capa de arranque se respeta start_slot, en las demás se empieza en 0
+        s0 = start_slot if layer == start_layer else 0
+        slot = s0
+
+        while slot < n_slots:
+            # Si el slot es un destino Half-B, se omite aquí
+            if is_half_destination(side, layer, slot):
+                slot += 1
+                continue
+
+            tp_log("Colocando en " + side +
+                   " L" + str(layer+1) +
+                   " S" + str(slot+1))
+
+            # Siempre se toma pieza completa del conveyor
+            do_pick("full")
+
+            # Verificar si es un origen Half (Half-A/B) o slot normal
+            is_half, dl, ds = find_half(side, layer, slot)
+
+            # Ejecutar lógica de Half o Full
+            do_half(side, layer, slot, is_half, dl, ds)
+
+            slot += 1
+        layer += 1
+
+# =====================================================================
+# MAIN
+# =====================================================================
+def main():
+    """
+    Flujo principal del programa:
+      - Configura TCP y tool_shape.
+      - Llama a safe_home.
+      - Pregunta lado, cama y slot inicial al operador.
+      - Maneja caso especial si el slot inicial es un destino Half-B.
+      - Ejecuta la secuencia desde el punto elegido.
+      - Regresa a home al finalizar.
+    """
+    # Configuración de la herramienta (nombres ya definidos en el controlador)
+    set_tcp("custom_gripper")
+    set_tool_shape("gripper_shape")
+
+    # Llevar al robot a home de forma segura
+    safe_home()
+
+    # Preguntar lado, layer y slot de arranque
+    side  = ask_side()
+    layer = ask_layer(side)
+    slot  = ask_slot(side, layer)
+
+    tp_log("Colocando en " + side +
+           " L" + str(layer+1) +
+           " S" + str(slot+1))
+
+    # Caso especial: el usuario selecciona un slot que es destino Half-B
+    if is_half_destination(side, layer, slot):
+        tp_log("Arranque en Half-B: se toma media pieza y se coloca en este slot.")
+
+        # Tomar sólo media pieza tipo B del conveyor
+        do_pick("half_b")
+        # Colocar Half-B en el slot seleccionado
+        do_place(side, layer, slot, "half_b")
+
+        # Marcar este slot como destino ya lleno
+        _halfB_filled.add((side, layer, slot))
+
+        # Definir el siguiente punto desde donde continuar
+        next_layer, next_slot = layer, slot + 1
+        layers = left_layers if side == "L" else right_layers
+
+        # Manejar cambio de capa si se pasa del último slot
+        if next_slot >= len(layers[layer]):
+            next_layer += 1
+            next_slot = 0
+
+        # Si aún hay capas por procesar, continuar desde ahí
+        if next_layer < len(layers):
+            run_from(side, next_layer, next_slot)
+
+        # Regresar a home y terminar
+        movej(pos=home, v=vj_fast, a=aj_slow, r=25)
+        return
+
+    # Caso normal: inicio en slot que NO es destino Half-B
+    # Se toma pieza completa del conveyor
+    do_pick("full")
+
+    # Revisar si este slot es origen de Half-A/B
+    is_half, dl, ds = find_half(side, layer, slot)
+    do_half(side, layer, slot, is_half, dl, ds)
+
+    # Continuar con el resto de slots a partir del siguiente
+    run_from(side, layer, slot + 1)
+
+    # Regresar a home al finalizar todo el lado
+    movej(pos=home, v=vj_fast, a=aj_slow, r=25)
+
+# Llamada al main (punto de entrada del programa)
+main()
