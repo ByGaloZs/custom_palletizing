@@ -105,126 +105,102 @@ def lifter_down():
 left_layers = [
     # LAYER 1 (Left)
     [
-        (593.0, 90.0, 235.0, -180.0, 0.0, -180.0),
+        (105.0, 402.0, 235.0, -180.0, 0.0, 90.0),
+        (593.0, 90.0, 235.0, -180.0, 0.0, 180.0),
         (593.0, 265.0, 235.0, -180.0, 0.0, -180.0),
         (593.0, 440.0, 235.0, -180.0, 0.0, -180.0),
         (593.0, 615.0, 235.0, -180.0, 0.0, -180.0),
         (593.0, 790.0, 235.0, -180.0, 0.0, -180.0),
         (593.0, 965.0, 235.0, -180.0, 0.0, -180.0),
-        (593.0, 1140.0,235.0, -180.0, 0.0, -180.0),
-        (105.0, 402.0,235.0, -180.0, 0.0, 90.0),
-        (105.0, 1212.0,235.0, -180.0, 0.0, 90.0)
+        (593.0, 1140.0, 235.0, -180.0, 0.0, -180.0),
+        (105.0, 1212.0, 235.0, -180.0, 0.0, 90.0)
     ],
     # LAYER 2 (Left)
     [
-        (915.0, 812.0,356.0, -180.0, 0.0, 90.0),
-        (915.0, 407.0,356.0, -180.0, 0.0, 90.0),
+        (915.0, 812.0, 356.0, -180.0, 0.0, 90.0),
+        (915.0, 407.0, 356.0, -180.0, 0.0, 90.0),
         (418.0, 90.0, 356.0, -180.0, 0.0, -180.0),
-        (418.0, 265.0,356.0, -180.0, 0.0, 180.0),
-        (418.0, 440.0,356.0, -180.0, 0.0, -180.0),
-        (418.0, 615.0,356.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0,356.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0,356.0, -180.0, 0.0, -180.0),
-        (418.0, 1140.0,356.0, -180.0, 0.0, -180.0)
+        (418.0, 265.0, 356.0, -180.0, 0.0, 180.0),
+        (418.0, 440.0, 356.0, -180.0, 0.0, -180.0),
+        (418.0, 615.0, 356.0, -180.0, 0.0, -180.0),
+        (418.0, 790.0, 356.0, -180.0, 0.0, -180.0),
+        (418.0, 965.0, 356.0, -180.0, 0.0, -180.0),
+        (418.0, 1140.0, 356.0, -180.0, 0.0, -180.0)
     ],
     # LAYER 3 (Left)
     [
+        (105.0, 402.0, 477.0, -180.0, 0.0, 90.0),
         (593.0, 90.0, 477.0, -180.0, 0.0, -180.0),
-        (593.0, 265.0,477.0, -180.0, 0.0, -180.0),
-        (593.0, 440.0,477.0, -180.0, 0.0, -180.0),
-        (593.0, 615.0,477.0, -180.0, 0.0, -180.0),
-        (593.0, 790.0,477.0, -180.0, 0.0, -180.0),
-        (593.0, 965.0,477.0, -180.0, 0.0, -180.0),
-        (593.0, 1140.0,477.0, -180.0, 0.0, -180.0),
-        (105.0, 402.0,477.0, -180.0, 0.0, 90.0),
-        (105.0, 1212.0,477.0, -180.0, 0.0, 90.0)
+        (593.0, 265.0, 477.0, -180.0, 0.0, -180.0),
+        (593.0, 440.0, 477.0, -180.0, 0.0, -180.0),
+        (593.0, 615.0, 477.0, -180.0, 0.0, -180.0),
+        (593.0, 790.0, 477.0, -180.0, 0.0, -180.0),
+        (593.0, 965.0, 477.0, -180.0, 0.0, -180.0),
+        (593.0, 1140.0, 477.0, -180.0, 0.0, -180.0),
+        (105.0, 1212.0, 477.0, -180.0, 0.0, 90.0)
     ],
     # LAYER 4 (Left)
     [
-        (915.0, 812.0,597.0, -180.0, 0.0, 90.0),
-        (915.0, 407.0,597.0, -180.0, 0.0, 90.0),
-        (418.0, 90.0, 597.0, -180.0, 0.0, -180.0),
-        (418.0, 265.0,597.0, -180.0, 0.0, 180.0),
-        (418.0, 440.0,597.0, -180.0, 0.0, -180.0),
-        (418.0, 615.0,597.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0,597.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0,597.0, -180.0, 0.0, -180.0),
-        (418.0, 1140.0,597.0, -180.0, 0.0, -180.0)
-    ],
-    # LAYER 5 (Left)
-    [
-        (593.0, 90.0, 717.0, -180.0, 0.0, -180.0),
-        (593.0, 265.0,717.0, -180.0, 0.0, -180.0),
-        (593.0, 440.0,717.0, -180.0, 0.0, -180.0),
-        (593.0, 615.0,717.0, -180.0, 0.0, -180.0),
-        (593.0, 790.0,717.0, -180.0, 0.0, -180.0),
-        (593.0, 965.0,717.0, -180.0, 0.0, -180.0),
-        (593.0, 1140.0,717.0, -180.0, 0.0, -180.0),
-        (105.0, 402.0,717.0, -180.0, 0.0, 90.0),
-        (105.0, 1212.0,717.0, -180.0, 0.0, 90.0)
+        (915.0, 812.0, 597.0, -180.0, 0.0, 90.0),
+        (915.0, 407.0, 597.0, -180.0, 0.0, 90.0),
+        (418.0, 90.0, 597.0, 180.0, 0.0, -180.0),
+        (418.0, 265.0, 597.0, -180.0, 0.0, -180.0),
+        (418.0, 440.0, 597.0, -180.0, 0.0, -180.0),
+        (418.0, 615.0, 597.0, -180.0, 0.0, -180.0),
+        (418.0, 790.0, 597.0, -180.0, 0.0, -180.0),
+        (418.0, 965.0, 597.0, -180.0, 0.0, -180.0),
+        (418.0, 1140.0, 597.0, -180.0, 0.0, -180.0)
     ]
 ]
 
 right_layers = [
     # LAYER 1 (Right)
     [
-        (438.0, 1130.0,235.0, -180.0, 0.0, 0.0),
-        (438.0, 955.0, 235.0, -180.0, 0.0, 0.0),
-        (438.0, 780.0, 235.0, -180.0, 0.0, 0.0),
-        (438.0, 605.0, 235.0, -180.0, 0.0, 0.0),
-        (438.0, 430.0, 235.0, -180.0, 0.0, 0.0),
-        (438.0, 255.0, 235.0, -180.0, 0.0, 0.0),
-        (438.0, 80.0,  235.0, -180.0, 0.0, 0.0),
-        (925.0, 403.0, 235.0, -180.0, 0.0, -90.0),
-        (926.5, 1213.0,235.0, -180.0, 0.0, -90.0)
+        (905.0, 402.0, 235.0, -180.0, 0.0, -90.0),
+        (417.0, 80.0, 235.0, -180.0, 0.0, 0.0),
+        (417.0, 255.0, 235.0, -180.0, 0.0, 0.0),
+        (417.0, 430.0, 235.0, -180.0, 0.0, 0.0),
+        (417.0, 605.0, 235.0, -180.0, 0.0, 0.0),
+        (417.0, 780.0, 235.0, -180.0, 0.0, 0.0),
+        (417.0, 955.0, 235.0, -180.0, 0.0, 0.0),
+        (417.0, 1130.0, 235.0, -180.0, 0.0, 0.0),
+        (905.0, 1213.0, 235.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 2 (Right)
     [
-        (115.0, 808.0,355.5, -180.0, 0.0, -90.0),
-        (115.0, 403.0,355.5, -180.0, 0.0, -90.0),
-        (612.0, 1130.0,355.5, -180.0, 0.0, 0.0),
-        (612.0, 955.0, 355.5, 180.0, 0.0, 0.0),
-        (612.0, 780.0, 355.5, -180.0, 0.0, 0.0),
-        (612.0, 605.0, 355.5, -180.0, 0.0, 0.0),
-        (612.0, 430.0, 355.5, 180.0, 0.0, 0.0),
-        (612.0, 255.0, 355.5, 180.0, 0.0, 0.0),
-        (612.0, 80.0,  355.5, -180.0, 0.0, 0.0)
+        (95.0, 808.0, 356.0, -180.0, 0.0, -90.0),
+        (95.0, 402.0, 356.0, -180.0, 0.0, -90.0),
+        (593.0, 80.0, 356.0, -180.0, 0.0, 0.0),
+        (593.0, 255.0, 356.0, -180.0, 0.0, 0.0),
+        (593.0, 430.0, 356.0, -180.0, 0.0, 0.0),
+        (593.0, 605.0, 356.0, -180.0, 0.0, 0.0),
+        (593.0, 780.0, 356.0, -180.0, 0.0, 0.0),
+        (593.0, 955.0, 356.0, -180.0, 0.0, 0.0),
+        (593.0, 1130.0, 356.0, -180.0, 0.0, 0.0)
     ],
     # LAYER 3 (Right)
     [
-        (438.0, 1130.0,475.0, -180.0, 0.0, 0.0),
-        (438.0, 955.0, 475.0, -180.0, 0.0, 0.0),
-        (438.0, 780.0, 475.0, -180.0, 0.0, 0.0),
-        (438.0, 605.0, 475.0, -180.0, 0.0, 0.0),
-        (438.0, 430.0, 475.0, -180.0, 0.0, 0.0),
-        (438.0, 255.0, 475.0, -180.0, 0.0, 0.0),
-        (438.0, 80.0,  475.0, -180.0, 0.0, 0.0),
-        (925.0, 403.0, 475.0, -180.0, 0.0, -90.0),
-        (926.5, 1213.0,475.0, -180.0, 0.0, -90.0)
+        (905.0, 402.0, 477.0, -180.0, 0.0, -90.0),
+        (417.0, 80.0, 477.0, -180.0, 0.0, 0.0),
+        (417.0, 255.0, 477.0, -180.0, 0.0, 0.0),
+        (417.0, 430.0, 477.0, -180.0, 0.0, 0.0),
+        (417.0, 605.0, 477.0, -180.0, 0.0, 0.0),
+        (417.0, 780.0, 477.0, -180.0, 0.0, 0.0),
+        (417.0, 955.0, 477.0, -180.0, 0.0, 0.0),
+        (417.0, 1130.0, 477.0, -180.0, 0.0, 0.0),
+        (905.0, 1213.0, 477.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 4 (Right)
     [
-        (115.0, 808.0,595.5, -180.0, 0.0, -90.0),
-        (115.0, 403.0,595.5, -180.0, 0.0, -90.0),
-        (612.0, 1130.0,595.5, -180.0, 0.0, 0.0),
-        (612.0, 955.0, 595.5, 180.0, 0.0, 0.0),
-        (612.0, 780.0, 595.5, -180.0, 0.0, 0.0),
-        (612.0, 605.0, 595.5, -180.0, 0.0, 0.0),
-        (612.0, 430.0, 595.5, 180.0, 0.0, 0.0),
-        (612.0, 255.0, 595.5, 180.0, 0.0, 0.0),
-        (612.0, 80.0,  595.5, -180.0, 0.0, 0.0)
-    ],
-    # LAYER 5 (Right)
-    [
-        (438.0, 1130.0,715.0, -180.0, 0.0, 0.0),
-        (438.0, 955.0, 715.0, -180.0, 0.0, 0.0),
-        (438.0, 780.0, 715.0, -180.0, 0.0, 0.0),
-        (438.0, 605.0, 715.0, -180.0, 0.0, 0.0),
-        (438.0, 430.0, 715.0, -180.0, 0.0, 0.0),
-        (438.0, 255.0, 715.0, -180.0, 0.0, 0.0),
-        (438.0, 80.0,  715.0, -180.0, 0.0, 0.0),
-        (925.0, 403.0, 715.0, -180.0, 0.0, -90.0),
-        (926.5, 1213.0,715.0, -180.0, 0.0, -90.0)
+        (95.0, 808.0, 598.0, -180.0, 0.0, -90.0),
+        (95.0, 402.0, 598.0, -180.0, 0.0, -90.0),
+        (593.0, 80.0, 598.0, -180.0, 0.0, 0.0),
+        (593.0, 255.0, 598.0, -180.0, 0.0, 0.0),
+        (593.0, 430.0, 598.0, -180.0, 0.0, 0.0),
+        (593.0, 605.0, 598.0, -180.0, 0.0, 0.0),
+        (593.0, 780.0, 598.0, -180.0, 0.0, 0.0),
+        (593.0, 955.0, 598.0, -180.0, 0.0, 0.0),
+        (593.0, 1130.0, 598.0, -180.0, 0.0, 0.0)
     ]
 ]
 
@@ -394,7 +370,7 @@ def do_pick(mode):
       - Regresa a up_conv
     """
     # Ir al hub sobre el conveyor
-    movej(pos=up_conv, v=vj_fast, a=aj_fast, r=25)
+    movej(pos=up_conv, v=vj_fast, a=aj_fast, r=5)
 
     # Calcular APPROACH, PICK y RETRACT (referenciados a conv_frame)
     a, _ = get_pick_app()
@@ -418,7 +394,7 @@ def do_pick(mode):
     movel(pos=r, v=vl_slow, a=al_slow, ref=conv_frame)
 
     # Volver al hub del conveyor
-    movej(pos=up_conv, v=vj_fast, a=aj_fast, r=25)
+    movej(pos=up_conv, v=vj_fast, a=aj_fast, r=5)
 
 def get_pick():
     # Devuelve la pose de pick y el frame del conveyor
@@ -455,7 +431,7 @@ def do_place(side, layer, slot, rtype):
     rt, rr = get_ret(side, layer, slot)    # Pose de retract y frame
 
     # Ir al hub del pallet
-    movej(pos=up, v=vj_fast, a=aj_fast, r=0)
+    movej(pos=up, v=vj_fast, a=aj_fast)
 
     # MidA/MidB (si la capa tiene mid definida)
     use_b = _is_group_b(side, layer, slot)
@@ -465,7 +441,7 @@ def do_place(side, layer, slot, rtype):
             tp_log("MidB en " + side + " L" + str(layer+1) + " S" + str(slot+1))
         else:
             tp_log("MidA en " + side + " L" + str(layer+1) + " S" + str(slot+1))
-        movej(pos=m, v=vj_fast, a=aj_fast, r=25)
+        movej(pos=m, v=vj_fast, a=aj_fast)
 
     # Aproximación al slot (con offsets dx_app/dy_app/dz_app)
     movel(pos=ap, v=vl_slow, a=al_slow, ref=ra)
@@ -483,7 +459,7 @@ def do_place(side, layer, slot, rtype):
     # Retiro en línea
     movel(pos=rt, v=vl_slow, a=al_slow, ref=rr)
     # Volver al hub del pallet
-    movej(pos=up, v=vj_fast, a=aj_fast, r=25)
+    movej(pos=up, v=vj_fast, a=aj_fast)
 
 # Half-B prellenados al arrancar (para no repetirlos luego si ya estaban llenos)
 # Contiene tuplas (side, layer, slot) que ya recibieron un Half-B.
@@ -521,7 +497,7 @@ def do_half(side, layer, slot, is_half, dl, ds):
         if ok:
             # Movernos al hub del lado antes de ir al destino Half-B
             movej(pos=(up_right if side == "R" else up_left),
-                  v=vj_slow, a=aj_slow, r=0)
+                  v=vj_slow, a=aj_slow)
             tp_log("Colocando Half-B en destino L" +
                    str(dl+1) + " S" + str(ds+1))
 
@@ -652,12 +628,12 @@ def safe_home():
 
     # Decidir hub según el cuadrante (Y positiva => pallets)
     if cy > 0:
-        movej(pos=_pal_hub(cx), v=vj_slow, a=aj_slow, r=10)
+        movej(pos=_pal_hub(cx), v=vj_slow, a=aj_slow)
     else:
-        movej(pos=up_conv, v=vj_slow, a=aj_slow, r=10)
+        movej(pos=up_conv, v=vj_slow, a=aj_slow)
 
     # Ir finalmente al home
-    movej(pos=home, v=vj_slow, a=aj_slow, r=10)
+    movej(pos=home, v=vj_slow, a=aj_slow)
 
 # =====================================================================
 # rutina: ejecutar desde (layer,slot) hasta acabar el lado
@@ -711,9 +687,10 @@ def main():
       - Configura TCP y tool_shape.
       - Llama a safe_home.
       - Pregunta lado, cama y slot inicial al operador.
-      - Maneja caso especial si el slot inicial es un destino Half-B.
-      - Ejecuta la secuencia desde el punto elegido.
-      - Regresa a home al finalizar.
+      - Maneja caso especial de arrancar en Half-B en ese lado.
+      - Ejecuta la secuencia completa de ese lado.
+      - Al terminar, ejecuta automáticamente el otro lado desde L1 S1.
+      - Regresa a home al final.
     """
     # Configuración de la herramienta (nombres ya definidos en el controlador)
     set_tcp("custom_gripper")
@@ -731,7 +708,10 @@ def main():
            " L" + str(layer+1) +
            " S" + str(slot+1))
 
-    # Caso especial: el usuario selecciona un slot que es destino Half-B
+    # Determinar el otro lado para después
+    other_side = "R" if side == "L" else "L"
+
+    # ----------------- CASO ESPECIAL: arrancar en Half-B -----------------
     if is_half_destination(side, layer, slot):
         tp_log("Arranque en Half-B: se toma media pieza y se coloca en este slot.")
 
@@ -743,7 +723,7 @@ def main():
         # Marcar este slot como destino ya lleno
         _halfB_filled.add((side, layer, slot))
 
-        # Definir el siguiente punto desde donde continuar
+        # Definir el siguiente punto desde donde continuar en el mismo lado
         next_layer, next_slot = layer, slot + 1
         layers = left_layers if side == "L" else right_layers
 
@@ -752,15 +732,20 @@ def main():
             next_layer += 1
             next_slot = 0
 
-        # Si aún hay capas por procesar, continuar desde ahí
+        # Si aún hay capas por procesar en este lado, continuar desde ahí
         if next_layer < len(layers):
             run_from(side, next_layer, next_slot)
+
+        # --------- AL TERMINAR ESTE LADO, EJECUTAR AUTOMÁTICAMENTE EL OTRO ---------
+        tp_log("Lado " + side + " finalizado. Iniciando lado " +
+               other_side + " desde L1 S1.")
+        run_from(other_side, 0, 0)
 
         # Regresar a home y terminar
         movej(pos=home, v=vj_fast, a=aj_slow, r=25)
         return
 
-    # Caso normal: inicio en slot que NO es destino Half-B
+    # ----------------- CASO NORMAL: slot inicial NO es destino Half-B -----------------
     # Se toma pieza completa del conveyor
     do_pick("full")
 
@@ -768,11 +753,15 @@ def main():
     is_half, dl, ds = find_half(side, layer, slot)
     do_half(side, layer, slot, is_half, dl, ds)
 
-    # Continuar con el resto de slots a partir del siguiente
+    # Continuar con el resto de slots a partir del siguiente en este lado
     run_from(side, layer, slot + 1)
 
-    # Regresar a home al finalizar todo el lado
-    movej(pos=home, v=vj_fast, a=aj_slow, r=25)
+    # --------- AL TERMINAR ESTE LADO, EJECUTAR AUTOMÁTICAMENTE EL OTRO ---------
+    tp_log("Lado " + side + " finalizado. Iniciando lado " +
+           other_side + " desde L1 S1.")
+    run_from(other_side, 0, 0)
 
-# Llamada al main (punto de entrada del programa)
+    # Regresar a home al finalizar todo
+    movej(pos=home, v=vj_fast, a=aj_slow, r=25)
+    
 main()
