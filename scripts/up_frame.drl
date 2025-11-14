@@ -7,7 +7,7 @@
 # ==========================================================================
 
 FRAME_ID    = 198      # ID del frame que representa el pallet
-DZ_LIFTER   = 350.0    # Cuánto sube el lifter físicamente (+ mm)
+DZ_LIFTER   = 350.0    # Cuánto sube el lifter 
 
 # ==> AQUÍ vas a pegar las posiciones que me quieras pasar:
 #     (ejemplo genérico, reemplázalas por tus posx reales)

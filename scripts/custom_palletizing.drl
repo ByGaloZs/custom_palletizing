@@ -9,7 +9,7 @@ left_frame = 102   # Frame del pallet izquierdo
 right_frame = 103  # Frame del pallet derecho
 
 # ---------------------- parámetros globales ---------
-# Modo de orientación: FIX XYZ, es decir RX, RY, RZ fijos (no ELR).
+# Modo de orientación: FIX XYZ (RX, RY, RZ fijos, no ELR).
 rot_mode = DR_FIX_XYZ
 
 # Offsets en Z para APPROACH y RETRACT con respecto al PLACE
@@ -22,20 +22,20 @@ dy_app = 0.0       # Offset en Y del APPROACH respecto al slot
 
 # ---------------------- velocidades -----------------
 # Velocidades y aceleraciones de joint (vj/aj) y lineales (vl/al)
-# Separa en "rápido" y "lento" para pick/place.
+# Se separa en "rápido" y "lento" para pick/place.
 vj_fast = 80;  aj_fast = 80
 vj_slow = 60;  aj_slow = 60
 vl_fast = 1000; al_fast = 1000
 vl_slow = 800;  al_slow = 800
 
-# ---------------------- poses joint auxiliares ------
+# ---------------------- poses joint auxiliares ------  
 # Home general del robot (posición segura de referencia)
 home = posj(-90.00, 0.00, 90.00, 0.00, 90.00, 90.00)
 
-# Posiciones "up" sobre zonas clave:
-up_conv  = posj(-57.60, 8.72, 80.72, 0.00, 90.55, 122.39)  # Hub sobre conveyor
-up_left  = posj(4.58, -8.86, 98.00, 0.00, 90.85, 94.58)    # Hub sobre pallet izquierdo
-up_right = posj(-175.42, -8.86, 98.01, 0.00, 90.86, 94.58) # Hub sobre pallet derecho
+# Posiciones "up" sobre zonas clave (hubs de seguridad):
+up_conv  = posj(-57.60,   8.72, 80.72, 0.00, 90.55, 122.39)  # Hub sobre conveyor
+up_left  = posj(  4.58,  -8.86, 98.00, 0.00, 90.85,  94.58)  # Hub sobre pallet izquierdo
+up_right = posj(-175.42, -8.86, 98.01, 0.00, 90.86,  94.58)  # Hub sobre pallet derecho
 
 # ---------------------- I/O gripper -----------------
 # Definición de las salidas digitales que controlan el gripper
@@ -44,112 +44,434 @@ do_b = 2  # DO para "mitad B" o la otra vía del gripper
 
 # Funciones de control del gripper (FULL / HALF A / HALF B / RELEASE)
 def grip_full():
-    # Activa ambas salidas -> agarra la caja completa
+    """
+    Activa ambas salidas -> agarra la caja completa.
+    """
     set_digital_output(do_a, ON)
     set_digital_output(do_b, ON)
     wait(0.2)
 
 def grip_half_a():
-    # Sólo activa 'A' -> agarra media caja tipo A
+    """
+    Sólo activa 'A' -> agarra media caja tipo A.
+    """
     set_digital_output(do_a, ON)
     set_digital_output(do_b, OFF)
     wait(0.2)
 
 def grip_half_b():
-    # Sólo activa 'B' -> agarra media caja tipo B
+    """
+    Sólo activa 'B' -> agarra media caja tipo B.
+    """
     set_digital_output(do_a, OFF)
     set_digital_output(do_b, ON)
     wait(0.2)
 
 def rel_full():
-    # Libera ambas mitades -> suelta caja completa
+    """
+    Libera ambas mitades -> suelta caja completa.
+    """
     set_digital_output(do_a, OFF)
     set_digital_output(do_b, OFF)
     wait(0.2)
 
 def rel_half_a():
-    # Libera sólo la mitad A
+    """
+    Libera sólo la mitad A (Half-A).
+    """
     set_digital_output(do_a, OFF)
     wait(0.15)
 
 def rel_half_b():
-    # Libera sólo la mitad B
+    """
+    Libera sólo la mitad B (Half-B).
+    """
     set_digital_output(do_b, OFF)
     wait(0.15)
 
-# ---------------------- I/O lifter ------------------
-# Salidas para controlar un lifter externo (aún no integradas en la lógica principal)
-do_lift_up   = 3
-do_lift_down = 4
-t_up = 3.0   # Tiempo para subir el lifter
-t_dn = 3.0   # Tiempo para bajar el lifter
 
-def lifter_up():
-    # Enciende la salida de subir, espera, y apaga
-    set_digital_output(do_lift_up, ON)
-    wait(t_up)
-    set_digital_output(do_lift_up, OFF)
+# =====================================================================
+# LIFTER100 (or_lift) - Lógica multinivel + seguridad + compensación
+# =====================================================================
 
-def lifter_down():
-    # Enciende la salida de bajar, espera, y apaga
-    set_digital_output(do_lift_down, ON)
-    wait(t_dn)
-    set_digital_output(do_lift_down, OFF)
+# Tramos mecánicos del lifter
+DZ_LIFTER_1 = 400.0         # primer tramo
+DZ_LIFTER_2 = 270.0         # segundo tramo (total ≈ 670 mm)
 
-# ---------------------- datos PLACE (por capas) -----
-# left_layers y right_layers:
-#   Estructura: lista de 5 LAYERS (0..4), cada layer contiene 9 slots (0..8)
-#   Cada entrada: (X, Y, Z, RX, RY, RZ)
-#   Se interpretan en el frame del pallet correspondiente (left_frame o right_frame).
+# Mapa lógico por cama (0-based):
+#   0..3 -> nivel 0 (0 mm, lifter abajo)
+#   4..6 -> nivel 1 (+400 mm)
+#   7..8 -> nivel 2 (+400+270 mm)
+def lifter_level_for_layer(layer):
+    """
+    Devuelve el nivel lógico del lifter según la cama (layer 0-based):
+      0-3 -> 0
+      4-6 -> 1
+      7-8 -> 2
+    """
+    if layer <= 3:
+        return 0
+    elif layer <= 6:
+        return 1
+    else:
+        return 2
+
+def _level_offset(level):
+    """
+    Devuelve el offset total en Z según el nivel del lifter.
+    Este offset se usa para compensar frames (bajan en Z cuando el lifter sube).
+    """
+    if level == 0:
+        return 0.0
+    elif level == 1:
+        return DZ_LIFTER_1
+    elif level == 2:
+        return DZ_LIFTER_1 + DZ_LIFTER_2
+    return 0.0
+
+def lifter_target_pos_for_level(level):
+    """
+    Posición objetivo en mm del Lift100 para un nivel lógico:
+      level 0 ->   0 mm
+      level 1 -> 400 mm
+      level 2 -> 670 mm
+    """
+    if level == 0:
+        return 0.0
+    elif level == 1:
+        return 400.0
+    elif level == 2:
+        return 670.0
+    return 0.0
+
+# Estado actual del lifter y frames originales
+_lifter_level = 0      # nivel actual (0,1,2)
+_orig_frames  = {}     # poses originales de conv_frame, left_frame, right_frame
+
+# ---------------------- helpers de seguridad Lift100 -----------------
+
+def lifter_wait_ready(timeout=15.0):
+    """
+    Espera a que el Lift100 termine cualquier movimiento (isBusy == False).
+    Usa un timeout para evitar bucles infinitos.
+    """
+    t = 0.0
+    while or_lift.isBusy():
+        wait(0.1)
+        t = t + 0.1
+        if t >= timeout:
+            tp_log("TIMEOUT esperando a que el Lift100 termine el movimiento.")
+            break
+
+def lifter_check_error():
+    """
+    Consulta or_lift.get_error() y registra el código si no es 0.
+    NO detiene el programa, sólo deja traza.
+    """
+    err = or_lift.get_error()
+    if err != 0:
+        tp_log("ADVERTENCIA: Lift100 error code = " + str(err))
+    return err
+
+def lifter_check_position(level, tol=5.0):
+    """
+    Verifica que el Lift100 esté dentro de una tolerancia ±tol [mm]
+    alrededor de la posición esperada para 'level'.
+    """
+    if not or_lift.isconn():
+        tp_log("Lift100 no conectado; no se puede verificar posición.")
+        return False
+
+    pos = or_lift.get_pos()
+    tgt = lifter_target_pos_for_level(level)
+    if abs(pos - tgt) <= tol:
+        return True
+
+    tp_log("ADVERTENCIA: Lift100 desincronizado. level=" + str(level) +
+           " pos=" + str(pos) + " esperado=" + str(tgt))
+    return False
+
+def lifter_safe_init():
+    """
+    Verifica conexión e inicialización del Lift100.
+    Si no está inicializado, ejecuta or_lift.init() y espera a que termine.
+    NO toca frames ni niveles, sólo deja el Lift100 referenciado.
+    """
+    if not or_lift.isconn():
+        tp_log("ERROR: Lift100 no conectado (or_lift.isconn() == False).")
+        return
+
+    if or_lift.isInit():
+        tp_log("Lift100 ya está inicializado.")
+        return
+
+    tp_log("Inicializando Lift100...")
+    or_lift.init()
+    lifter_wait_ready()
+
+    if not or_lift.isInit():
+        tp_log("ADVERTENCIA: or_lift.isInit() sigue en False después de init().")
+    else:
+        tp_log("Lift100 inicializado correctamente.")
+
+# ---------------------- frames + nivel lifter ------------------------
+
+def lifter_frames_init():
+    """
+    Lee y guarda las poses originales de los frames que se van a compensar
+    cuando cambie el nivel del lifter. Se llama una vez al inicio del programa.
+    """
+    global _orig_frames, _lifter_level
+    _orig_frames = {}
+    for fid in (conv_frame, left_frame, right_frame):
+        pose, ref = get_user_cart_coord(fid)
+        _orig_frames[fid] = (pose, ref)
+    _lifter_level = 0
+    tp_log("Frames originales guardados para compensación de lifter.")
+
+def _lifter_do_set_level(level):
+    """
+    Ajusta el Lift100 al nivel indicado usando or_lift.move().
+    Niveles permitidos:
+      0 -> ~0 mm
+      1 -> ~400 mm
+      2 -> ~670 mm
+    Incluye:
+      - Verificación de conexión.
+      - Inicialización segura si aún no está init.
+      - Espera a que termine el movimiento (isBusy).
+      - Chequeo de error y de posición final.
+    """
+    # Asegurar conexión e init
+    lifter_safe_init()
+    if not or_lift.isconn():
+        tp_log("No se puede mover Lift100: sin conexión.")
+        return
+
+    # Nivel objetivo → posición objetivo
+    if not (level == 0 or level == 1 or level == 2):
+        tp_log("Nivel Lift100 inválido: " + str(level) +
+               ". Re-inicializando a posición 0.")
+        or_lift.init()
+        lifter_wait_ready()
+        lifter_check_error()
+        return
+
+    tgt = lifter_target_pos_for_level(level)
+
+    # Si ya está dentro de tolerancia y no está ocupado, no mover
+    cur = or_lift.get_pos()
+    if abs(cur - tgt) < 2.0 and (not or_lift.isBusy()):
+        tp_log("Lift100 ya en nivel " + str(level) +
+               " (pos=" + str(cur) + " mm).")
+        return
+
+    tp_log("Moviendo Lift100 a nivel " + str(level) +
+           " (" + str(tgt) + " mm).")
+
+    # Movimiento con velocidad razonable dentro del rango 10–100 mm/s
+    or_lift.move(tgt, 80.0)
+
+    # Esperar a que termine
+    lifter_wait_ready()
+
+    # Revisar si hay errores
+    lifter_check_error()
+
+    # Verificar posición final
+    lifter_check_position(level)
+
+def lifter_set_level(side, level):
+    """
+    Cambia el nivel del lifter (0,1,2) y compensa frames:
+      - Siempre compensa el conveyor (conv_frame).
+      - Compensa SOLO el pallet del lado actual:
+          * side == "L" → left_frame
+          * side == "R" → right_frame
+      - El pallet del otro lado se mantiene en su pose original
+        (sin compensar).
+    El cálculo SIEMPRE parte de las poses originales (_orig_frames),
+    así evitamos acumulaciones numéricas.
+    """
+    global _lifter_level
+    if level == _lifter_level:
+        return  # ya estamos en ese nivel
+
+    tp_log("Cambiando lifter a nivel " + str(level) +
+           " para lado " + side)
+
+    # Mover elevador físicamente
+    _lifter_do_set_level(level)
+
+    # Offset en Z (el lifter sube +dz, los frames bajan -dz)
+    dz = _level_offset(level)
+
+    # Siempre compensar conveyor
+    pose_c, ref_c = _orig_frames[conv_frame]
+    new_c = posx(pose_c[0],
+                 pose_c[1],
+                 pose_c[2] - dz,
+                 pose_c[3],
+                 pose_c[4],
+                 pose_c[5],
+                 rot_mode)
+    overwrite_user_cart_coord(conv_frame, new_c, ref_c, DR_TEMPORARY)
+
+    # Pallet del lado actual
+    pal_id = left_frame if side == "L" else right_frame
+    pose_p, ref_p = _orig_frames[pal_id]
+    new_p = posx(pose_p[0],
+                 pose_p[1],
+                 pose_p[2] - dz,
+                 pose_p[3],
+                 pose_p[4],
+                 pose_p[5],
+                 rot_mode)
+    overwrite_user_cart_coord(pal_id, new_p, ref_p, DR_TEMPORARY)
+
+    # Pallet del otro lado se mantiene en pose original
+    other_id = right_frame if side == "L" else left_frame
+    pose_o, ref_o = _orig_frames[other_id]
+    overwrite_user_cart_coord(other_id, pose_o, ref_o, DR_TEMPORARY)
+
+    _lifter_level = level
+
+def lifter_restore_frames():
+    """
+    Vuelve a nivel 0 (abajo) y restaura las poses originales
+    de conveyor y pallets. Es seguro llamarlo varias veces.
+    """
+    global _lifter_level
+    if _lifter_level == 0:
+        # Asegurar que el Lift100 también está realmente en 0 mm
+        _lifter_do_set_level(0)
+        return
+
+    tp_log("Restaurando nivel 0 de lifter y frames originales.")
+    _lifter_do_set_level(0)
+
+    for fid, (pose, ref) in _orig_frames.items():
+        overwrite_user_cart_coord(fid, pose, ref, DR_TEMPORARY)
+
+    _lifter_level = 0
+
+
+# =====================================================================
+# Datos PLACE (por capas y lados)
+# =====================================================================
+# Estructura:
+#   left_layers / right_layers: lista de layers (0..N-1).
+#   Cada layer: lista de 9 slots (0..8).
+#   Cada slot: (X, Y, Z, RX, RY, RZ) en el frame del pallet.
 
 left_layers = [
     # LAYER 1 (Left)
     [
-        (105.0, 402.0, 235.0, -180.0, 0.0, 90.0),
-        (593.0, 90.0, 235.0, -180.0, 0.0, 180.0),
-        (593.0, 265.0, 235.0, -180.0, 0.0, -180.0),
-        (593.0, 440.0, 235.0, -180.0, 0.0, -180.0),
-        (593.0, 615.0, 235.0, -180.0, 0.0, -180.0),
-        (593.0, 790.0, 235.0, -180.0, 0.0, -180.0),
-        (593.0, 965.0, 235.0, -180.0, 0.0, -180.0),
-        (593.0, 1140.0, 235.0, -180.0, 0.0, -180.0),
-        (105.0, 1212.0, 235.0, -180.0, 0.0, 90.0)
+        (105.0, 402.0, 235.0, -180.0, 0.0,  90.0),
+        (593.0,  90.0, 235.0, -180.0, 0.0, 180.0),
+        (593.0, 265.0, 235.0, -180.0, 0.0,-180.0),
+        (593.0, 440.0, 235.0, -180.0, 0.0,-180.0),
+        (593.0, 615.0, 235.0, -180.0, 0.0,-180.0),
+        (593.0, 790.0, 235.0, -180.0, 0.0,-180.0),
+        (593.0, 965.0, 235.0, -180.0, 0.0,-180.0),
+        (593.0,1140.0, 235.0, -180.0, 0.0,-180.0),
+        (105.0,1212.0, 235.0, -180.0, 0.0,  90.0)
     ],
     # LAYER 2 (Left)
     [
-        (915.0, 812.0, 356.0, -180.0, 0.0, 90.0),
-        (915.0, 407.0, 356.0, -180.0, 0.0, 90.0),
-        (418.0, 90.0, 356.0, -180.0, 0.0, -180.0),
+        (915.0, 812.0, 356.0, -180.0, 0.0,  90.0),
+        (915.0, 407.0, 356.0, -180.0, 0.0,  90.0),
+        (418.0,  90.0, 356.0, -180.0, 0.0,-180.0),
         (418.0, 265.0, 356.0, -180.0, 0.0, 180.0),
-        (418.0, 440.0, 356.0, -180.0, 0.0, -180.0),
-        (418.0, 615.0, 356.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0, 356.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0, 356.0, -180.0, 0.0, -180.0),
-        (418.0, 1140.0, 356.0, -180.0, 0.0, -180.0)
+        (418.0, 440.0, 356.0, -180.0, 0.0,-180.0),
+        (418.0, 615.0, 356.0, -180.0, 0.0,-180.0),
+        (418.0, 790.0, 356.0, -180.0, 0.0,-180.0),
+        (418.0, 965.0, 356.0, -180.0, 0.0,-180.0),
+        (418.0,1140.0, 356.0, -180.0, 0.0,-180.0)
     ],
     # LAYER 3 (Left)
     [
-        (105.0, 402.0, 477.0, -180.0, 0.0, 90.0),
-        (593.0, 90.0, 477.0, -180.0, 0.0, -180.0),
-        (593.0, 265.0, 477.0, -180.0, 0.0, -180.0),
-        (593.0, 440.0, 477.0, -180.0, 0.0, -180.0),
-        (593.0, 615.0, 477.0, -180.0, 0.0, -180.0),
-        (593.0, 790.0, 477.0, -180.0, 0.0, -180.0),
-        (593.0, 965.0, 477.0, -180.0, 0.0, -180.0),
-        (593.0, 1140.0, 477.0, -180.0, 0.0, -180.0),
-        (105.0, 1212.0, 477.0, -180.0, 0.0, 90.0)
+        (105.0, 402.0, 477.0, -180.0, 0.0,  90.0),
+        (593.0,  90.0, 477.0, -180.0, 0.0,-180.0),
+        (593.0, 265.0, 477.0, -180.0, 0.0,-180.0),
+        (593.0, 440.0, 477.0, -180.0, 0.0,-180.0),
+        (593.0, 615.0, 477.0, -180.0, 0.0,-180.0),
+        (593.0, 790.0, 477.0, -180.0, 0.0,-180.0),
+        (593.0, 965.0, 477.0, -180.0, 0.0,-180.0),
+        (593.0,1140.0, 477.0, -180.0, 0.0,-180.0),
+        (105.0,1212.0, 477.0, -180.0, 0.0,  90.0)
     ],
     # LAYER 4 (Left)
     [
-        (915.0, 812.0, 597.0, -180.0, 0.0, 90.0),
-        (915.0, 407.0, 597.0, -180.0, 0.0, 90.0),
-        (418.0, 90.0, 597.0, 180.0, 0.0, -180.0),
-        (418.0, 265.0, 597.0, -180.0, 0.0, -180.0),
-        (418.0, 440.0, 597.0, -180.0, 0.0, -180.0),
-        (418.0, 615.0, 597.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0, 597.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0, 597.0, -180.0, 0.0, -180.0),
-        (418.0, 1140.0, 597.0, -180.0, 0.0, -180.0)
+        (915.0, 812.0, 597.0, -180.0, 0.0,  90.0),
+        (915.0, 407.0, 597.0, -180.0, 0.0,  90.0),
+        (418.0,  90.0, 597.0,  180.0, 0.0,-180.0),
+        (418.0, 265.0, 597.0, -180.0, 0.0,-180.0),
+        (418.0, 440.0, 597.0, -180.0, 0.0,-180.0),
+        (418.0, 615.0, 597.0, -180.0, 0.0,-180.0),
+        (418.0, 790.0, 597.0, -180.0, 0.0,-180.0),
+        (418.0, 965.0, 597.0, -180.0, 0.0,-180.0),
+        (418.0,1140.0, 597.0, -180.0, 0.0,-180.0)
+    ],
+    # LAYER 5 (Left)
+    [
+        (105.0, 402.0, 717.0, -180.0, 0.0,  90.0),
+        (593.0,  90.0, 717.0, -180.0, 0.0, 180.0),
+        (593.0, 265.0, 717.0, -180.0, 0.0,-180.0),
+        (593.0, 440.0, 717.0, -180.0, 0.0,-180.0),
+        (593.0, 615.0, 717.0, -180.0, 0.0,-180.0),
+        (593.0, 790.0, 717.0, -180.0, 0.0,-180.0),
+        (593.0, 965.0, 717.0, -180.0, 0.0,-180.0),
+        (593.0,1140.0, 717.0, -180.0, 0.0,-180.0),
+        (105.0,1212.0, 717.0, -180.0, 0.0,  90.0)
+    ],
+    # LAYER 6 (Left)
+    [
+        (915.0, 812.0, 837.0, -180.0, 0.0,  90.0),
+        (915.0, 407.0, 837.0, -180.0, 0.0,  90.0),
+        (418.0,  90.0, 837.0,  180.0, 0.0,-180.0),
+        (418.0, 265.0, 837.0, -180.0, 0.0,-180.0),
+        (418.0, 440.0, 837.0, -180.0, 0.0, 180.0),
+        (418.0, 615.0, 837.0, -180.0, 0.0,-180.0),
+        (418.0, 790.0, 837.0,  180.0, 0.0,-180.0),
+        (418.0, 965.0, 837.0, -180.0, 0.0,-180.0),
+        (418.0,1140.0, 837.0, -180.0, 0.0,-180.0)
+    ],
+    # LAYER 7 (Left)
+    [
+        (105.0, 402.0, 957.0, -180.0, 0.0,  90.0),
+        (593.0,  90.0, 957.0, -180.0, 0.0,-180.0),
+        (593.0, 265.0, 957.0, -180.0, 0.0,-180.0),
+        (593.0, 440.0, 957.0, -180.0, 0.0,-180.0),
+        (593.0, 615.0, 957.0, -180.0, 0.0,-180.0),
+        (593.0, 790.0, 957.0, -180.0, 0.0,-180.0),
+        (593.0, 965.0, 957.0, -180.0, 0.0, 180.0),
+        (593.0,1140.0, 957.0, -180.0, 0.0,-180.0),
+        (105.0,1212.0, 957.0, -180.0, 0.0,  90.0)
+    ],
+    # LAYER 8 (Left)
+    [
+        (915.0, 812.0,1077.0, -180.0, 0.0,  90.0),
+        (915.0, 407.0,1077.0, -180.0, 0.0,  90.0),
+        (418.0,  90.0,1077.0, -180.0, 0.0,-180.0),
+        (418.0, 265.0,1077.0, -180.0, 0.0,-180.0),
+        (418.0, 440.0,1077.0, -180.0, 0.0,-180.0),
+        (418.0, 615.0,1077.0, -180.0, 0.0,-180.0),
+        (418.0, 790.0,1077.0, -180.0, 0.0,-180.0),
+        (418.0, 965.0,1077.0, -180.0, 0.0, 180.0),
+        (418.0,1140.0,1077.0, -180.0, 0.0,-180.0)
+    ],
+    # LAYER 9 (Left)
+    [
+        (105.0, 402.0,1197.0, -180.0, 0.0,  90.0),
+        (593.0,  90.0,1197.0, -180.0, 0.0,-180.0),
+        (593.0, 265.0,1197.0, -180.0, 0.0,-180.0),
+        (593.0, 440.0,1197.0, -180.0, 0.0,-180.0),
+        (593.0, 615.0,1197.0, -180.0, 0.0,-180.0),
+        (593.0, 790.0,1197.0, -180.0, 0.0,-180.0),
+        (593.0, 965.0,1197.0, -180.0, 0.0, 180.0),
+        (593.0,1140.0,1197.0, -180.0, 0.0,-180.0),
+        (105.0,1212.0,1197.0, -180.0, 0.0,  90.0)
     ]
 ]
 
@@ -157,114 +479,137 @@ right_layers = [
     # LAYER 1 (Right)
     [
         (905.0, 402.0, 235.0, -180.0, 0.0, -90.0),
-        (417.0, 80.0, 235.0, -180.0, 0.0, 0.0),
-        (417.0, 255.0, 235.0, -180.0, 0.0, 0.0),
-        (417.0, 430.0, 235.0, -180.0, 0.0, 0.0),
-        (417.0, 605.0, 235.0, -180.0, 0.0, 0.0),
-        (417.0, 780.0, 235.0, -180.0, 0.0, 0.0),
-        (417.0, 955.0, 235.0, -180.0, 0.0, 0.0),
-        (417.0, 1130.0, 235.0, -180.0, 0.0, 0.0),
-        (905.0, 1213.0, 235.0, -180.0, 0.0, -90.0)
+        (417.0,  80.0, 235.0, -180.0, 0.0,   0.0),
+        (417.0, 255.0, 235.0, -180.0, 0.0,   0.0),
+        (417.0, 430.0, 235.0, -180.0, 0.0,   0.0),
+        (417.0, 605.0, 235.0, -180.0, 0.0,   0.0),
+        (417.0, 780.0, 235.0, -180.0, 0.0,   0.0),
+        (417.0, 955.0, 235.0, -180.0, 0.0,   0.0),
+        (417.0,1130.0, 235.0, -180.0, 0.0,   0.0),
+        (905.0,1213.0, 235.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 2 (Right)
     [
-        (95.0, 808.0, 356.0, -180.0, 0.0, -90.0),
-        (95.0, 402.0, 356.0, -180.0, 0.0, -90.0),
-        (593.0, 80.0, 356.0, -180.0, 0.0, 0.0),
-        (593.0, 255.0, 356.0, -180.0, 0.0, 0.0),
-        (593.0, 430.0, 356.0, -180.0, 0.0, 0.0),
-        (593.0, 605.0, 356.0, -180.0, 0.0, 0.0),
-        (593.0, 780.0, 356.0, -180.0, 0.0, 0.0),
-        (593.0, 955.0, 356.0, -180.0, 0.0, 0.0),
-        (593.0, 1130.0, 356.0, -180.0, 0.0, 0.0)
+        ( 95.0, 808.0, 356.0, -180.0, 0.0, -90.0),
+        ( 95.0, 402.0, 356.0, -180.0, 0.0, -90.0),
+        (593.0,  80.0, 356.0, -180.0, 0.0,   0.0),
+        (593.0, 255.0, 356.0, -180.0, 0.0,   0.0),
+        (593.0, 430.0, 356.0, -180.0, 0.0,   0.0),
+        (593.0, 605.0, 356.0, -180.0, 0.0,   0.0),
+        (593.0, 780.0, 356.0, -180.0, 0.0,   0.0),
+        (593.0, 955.0, 356.0, -180.0, 0.0,   0.0),
+        (593.0,1130.0, 356.0, -180.0, 0.0,   0.0)
     ],
     # LAYER 3 (Right)
     [
         (905.0, 402.0, 477.0, -180.0, 0.0, -90.0),
-        (417.0, 80.0, 477.0, -180.0, 0.0, 0.0),
-        (417.0, 255.0, 477.0, -180.0, 0.0, 0.0),
-        (417.0, 430.0, 477.0, -180.0, 0.0, 0.0),
-        (417.0, 605.0, 477.0, -180.0, 0.0, 0.0),
-        (417.0, 780.0, 477.0, -180.0, 0.0, 0.0),
-        (417.0, 955.0, 477.0, -180.0, 0.0, 0.0),
-        (417.0, 1130.0, 477.0, -180.0, 0.0, 0.0),
-        (905.0, 1213.0, 477.0, -180.0, 0.0, -90.0)
+        (417.0,  80.0, 477.0, -180.0, 0.0,   0.0),
+        (417.0, 255.0, 477.0, -180.0, 0.0,   0.0),
+        (417.0, 430.0, 477.0, -180.0, 0.0,   0.0),
+        (417.0, 605.0, 477.0, -180.0, 0.0,   0.0),
+        (417.0, 780.0, 477.0, -180.0, 0.0,   0.0),
+        (417.0, 955.0, 477.0, -180.0, 0.0,   0.0),
+        (417.0,1130.0, 477.0, -180.0, 0.0,   0.0),
+        (905.0,1213.0, 477.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 4 (Right)
     [
-        (95.0, 808.0, 598.0, -180.0, 0.0, -90.0),
-        (95.0, 402.0, 598.0, -180.0, 0.0, -90.0),
-        (593.0, 80.0, 598.0, -180.0, 0.0, 0.0),
-        (593.0, 255.0, 598.0, -180.0, 0.0, 0.0),
-        (593.0, 430.0, 598.0, -180.0, 0.0, 0.0),
-        (593.0, 605.0, 598.0, -180.0, 0.0, 0.0),
-        (593.0, 780.0, 598.0, -180.0, 0.0, 0.0),
-        (593.0, 955.0, 598.0, -180.0, 0.0, 0.0),
-        (593.0, 1130.0, 598.0, -180.0, 0.0, 0.0)
+        ( 95.0, 808.0, 598.0, -180.0, 0.0, -90.0),
+        ( 95.0, 402.0, 598.0, -180.0, 0.0, -90.0),
+        (593.0,  80.0, 598.0, -180.0, 0.0,   0.0),
+        (593.0, 255.0, 598.0, -180.0, 0.0,   0.0),
+        (593.0, 430.0, 598.0, -180.0, 0.0,   0.0),
+        (593.0, 605.0, 598.0, -180.0, 0.0,   0.0),
+        (593.0, 780.0, 598.0, -180.0, 0.0,   0.0),
+        (593.0, 955.0, 598.0, -180.0, 0.0,   0.0),
+        (593.0,1130.0, 598.0, -180.0, 0.0,   0.0)
     ]
 ]
 
-# ---------------------- half plan (A→B) -------------
-# Plan de mitades:
+# =====================================================================
+# Half plan (A→B)
+# =====================================================================
 # Cada tupla: (layer_origen, slot_origen, layer_destino_halfB, slot_destino_halfB)
 # Ejemplo (0,8,1,0):
 #   - Half-A se coloca en L1 S9 (layer=0, slot=8)
 #   - Half-B se coloca en L2 S1 (layer=1, slot=0)
-half_plan_left  = [(0,8,1,0), (2,8,3,0)]
+
+half_plan_left  = [(0,8,1,0), (2,8,3,0), (4,8,5,0), (6,8,7,0)]
 half_plan_right = [(0,8,1,0), (2,8,3,0)]
 
-# ---------------------- mid por capa (dos variantes) --------
-# mid_left_a / mid_right_a:
-#   Joint targets intermedios (MidA) por capa (0..4) para cada lado.
+# =====================================================================
+# Mid por capa (MidA / MidB) en joints
+# =====================================================================
+# MidA: joint targets intermedios por capa (para cada lado).
+# MidB: MidA con J6 rotado +90° (cambio de orientación de muñeca).
+
 mid_left_a = [
-    posj(0.72, 58.86,107.11, 0.00,14.02, 0.72),
-    posj(0.72, 49.68,109.40, 0.00,20.90, 0.72),
-    posj(0.72, 40.89,109.82, 0.00,29.27, 0.72),
-    posj(0.72, 32.94,108.37, 0.00,38.67, 0.72),
-    posj(0.72, 26.11,105.11, 0.00,48.77, 0.72)
+    posj(0.72, 58.86,107.11, 0.00,14.02,  0.72),
+    posj(0.72, 49.68,109.40, 0.00,20.90,  0.72),
+    posj(0.72, 40.89,109.82, 0.00,29.27,  0.72),
+    posj(0.72, 32.94,108.37, 0.00,38.67,  0.72),
+    posj(0.72, 52.23,108.94, 0.00,18.80,  0.72),
+    posj(0.72, 43.37,109.89, 0.00,26.71,  0.72),
+    posj(0.72, 35.16,108.98, 0.00,35.83,  0.72),
+    posj(0.72, 27.97,106.24, 0.00,45.76,  0.72),
+    posj(0.72, 22.09,101.74, 0.00,56.14,  0.72)
 ]
 
 mid_right_a = [
-    posj(-181.11,58.26,110.56,0.00,11.16,-1.11),
-    posj(-181.11,48.75,112.90,0.00,18.33,-1.11),
-    posj(-181.11,39.58,113.33,0.00,27.07,-1.11),
-    posj(-181.11,31.26,111.85,0.00,36.88,-1.11),
-    posj(-181.11,24.10,108.52,0.00,47.36,-1.11)
+    posj(-181.11,58.26,110.56,0.00,11.16, -1.11),
+    posj(-181.11,48.75,112.90,0.00,18.33, -1.11),
+    posj(-181.11,39.58,113.33,0.00,27.07, -1.11),
+    posj(-181.11,31.26,111.85,0.00,36.88, -1.11),
+    posj(-181.11,24.10,108.52,0.00,47.36, -1.11)
 ]
 
 def _rot_j6(j, delta):
-    # Devuelve un nuevo posj con el mismo J1..J5 y J6 rotado en "delta"
+    """
+    Devuelve un nuevo posj con el mismo J1..J5 y J6 rotado en 'delta'.
+    """
     return posj(j[0], j[1], j[2], j[3], j[4], j[5] + delta)
 
 # MidB = MidA con J6 rotado +90°
-mid_left_b  = [ _rot_j6(j, 90.0) for j in mid_left_a  ]
-mid_right_b = [ _rot_j6(j, 90.0) for j in mid_right_a ]
+mid_left_b  = [ _rot_j6(j,  90.0) for j in mid_left_a  ]
+mid_right_b = [ _rot_j6(j,  90.0) for j in mid_right_a ]
 
 # ---------------------- mapa MidB configurable -------------
 # midB_map_left/right contiene (layer,slot) en 0-based que usarán MidB.
 # Todo lo demás usa MidA.
 # Regla:
-#  L1,3,5: slot 1 y 9 -> MidB, 2..8 MidA
-#  L2,4:   slots 1,2 -> MidB, 3..9 MidA
+#  L1,3,5,7,9: slot 1 y 9 -> MidB, 2..8 MidA
+#  L2,4,6,8:   slots 1,2 -> MidB, 3..9 MidA
+
 midB_map_left = [
     (0,0), (0,8),
     (1,0), (1,1),
     (2,0), (2,8),
     (3,0), (3,1),
-    (4,0), (4,8)
+    (4,0), (4,8),
+    (5,0), (5,1),
+    (6,0), (6,8),
+    (7,0), (7,1),
+    (8,0), (8,8)
 ]
-# Por defecto el Right usa el mismo patrón; se puede cambiar después si se desea.
+
+# Por defecto el Right usa el mismo patrón; se puede modificar más adelante.
 midB_map_right = list(midB_map_left)
 
 # =====================================================================
-# utilidades geométricas
+# Utilidades geométricas
 # =====================================================================
+
 def mk_off(dz):
-    # Crea una posx de offset en Z (relativo) con orientaciones 0
+    """
+    Crea una posx de offset en Z (relativo) con orientaciones 0.
+    Se usa para APPROACH/RETRACT en pick/place.
+    """
     return posx(0.0, 0.0, dz, 0.0, 0.0, 0.0, rot_mode)
 
 def mk_off_app():
-    # Offset sólo para APPROACH de PLACE: (dx_app, dy_app, dz_app)
+    """
+    Offset sólo para APPROACH de PLACE: (dx_app, dy_app, dz_app).
+    """
     return posx(dx_app, dy_app, dz_app, 0.0, 0.0, 0.0, rot_mode)
 
 def get_place(side, layer, slot):
@@ -286,7 +631,7 @@ def get_app(side, layer, slot):
     PLACE + (dx_app, dy_app, dz_app) en el frame del pallet.
     """
     pl, rf = get_place(side, layer, slot)
-    return trans(pos=pl, delta=mk_off_app(), ref=rf, ref_out=rf), rf
+    return trans(pl, mk_off_app(), rf, rf), rf
 
 def get_ret(side, layer, slot):
     """
@@ -294,7 +639,7 @@ def get_ret(side, layer, slot):
     PLACE + (0, 0, dz_ret) en el frame del pallet.
     """
     pl, rf = get_place(side, layer, slot)
-    return trans(pos=pl, delta=mk_off(dz_ret), ref=rf, ref_out=rf), rf
+    return trans(pl, mk_off(dz_ret), rf, rf), rf
 
 def find_half(side, layer, slot):
     """
@@ -322,10 +667,10 @@ def is_half_destination(side, layer, slot):
             return True
     return False
 
-# --------- selección de mid A/B según tabla ----------
+# --------- selección de MidA / MidB según tabla ----------
 def _is_group_b(side, layer, slot):
     """
-    Determina si este (layer,slot) debe usar MidB (rotado +90° en J6)
+    Determina si este (layer,slot) debe usar MidB (J6 +90°)
     según midB_map_left/right.
     """
     if side == "L":
@@ -354,10 +699,29 @@ def get_mid(side, layer, slot):
             return mid_right_a[layer] if layer < len(mid_right_a) else None
 
 # =====================================================================
-# pick desde conveyor (según modo de agarre)
+# Pick desde conveyor
 # =====================================================================
+
 # Pose cartesiana del pick en el conveyor (en conv_frame)
 pick_pose = posx(402.00, -89.50, 320.00, 180.00, 0.00, 0.0, rot_mode)
+
+def get_pick():
+    """
+    Devuelve la pose de pick y el frame del conveyor.
+    """
+    return pick_pose, conv_frame
+
+def get_pick_app():
+    """
+    APPROACH del pick: pick_pose + dz_app en Z del conveyor.
+    """
+    return trans(pick_pose, mk_off(dz_app), conv_frame, conv_frame), conv_frame
+
+def get_pick_ret():
+    """
+    RETRACT del pick: pick_pose + dz_ret en Z del conveyor.
+    """
+    return trans(pick_pose, mk_off(dz_ret), conv_frame, conv_frame), conv_frame
 
 def do_pick(mode):
     """
@@ -370,7 +734,7 @@ def do_pick(mode):
       - Regresa a up_conv
     """
     # Ir al hub sobre el conveyor
-    movej(pos=up_conv, v=vj_fast, a=aj_fast, r=5)
+    movej(up_conv, vj_fast, aj_fast, r=5)
 
     # Calcular APPROACH, PICK y RETRACT (referenciados a conv_frame)
     a, _ = get_pick_app()
@@ -378,9 +742,9 @@ def do_pick(mode):
     r, _ = get_pick_ret()
 
     # Aproximación lenta en línea
-    movel(pos=a, v=vl_slow, a=al_slow, ref=conv_frame)
+    movel(a, v=vl_slow, a=al_slow, ref=conv_frame)
     # Bajar al pick
-    movel(pos=p, v=vl_slow, a=al_slow, ref=conv_frame)
+    movel(p, v=vl_slow, a=al_slow, ref=conv_frame)
 
     # Selección del modo de agarre
     if mode == "full":
@@ -391,26 +755,15 @@ def do_pick(mode):
         grip_half_b()
 
     # Retiro en línea
-    movel(pos=r, v=vl_slow, a=al_slow, ref=conv_frame)
+    movel(r, v=vl_slow, a=al_slow, ref=conv_frame)
 
     # Volver al hub del conveyor
-    movej(pos=up_conv, v=vj_fast, a=aj_fast, r=5)
-
-def get_pick():
-    # Devuelve la pose de pick y el frame del conveyor
-    return pick_pose, conv_frame
-
-def get_pick_app():
-    # APPROACH del pick: pick_pose + dz_app en Z del conveyor
-    return trans(pos=pick_pose, delta=mk_off(dz_app), ref=conv_frame, ref_out=conv_frame), conv_frame
-
-def get_pick_ret():
-    # RETRACT del pick: pick_pose + dz_ret en Z del conveyor
-    return trans(pos=pick_pose, delta=mk_off(dz_ret), ref=conv_frame, ref_out=conv_frame), conv_frame
+    movej(up_conv, vj_fast, aj_fast, r=5)
 
 # =====================================================================
-# place (full / half)
+# Place (full / half)
 # =====================================================================
+
 def do_place(side, layer, slot, rtype):
     """
     Secuencia completa de place en un slot:
@@ -431,7 +784,7 @@ def do_place(side, layer, slot, rtype):
     rt, rr = get_ret(side, layer, slot)    # Pose de retract y frame
 
     # Ir al hub del pallet
-    movej(pos=up, v=vj_fast, a=aj_fast)
+    movej(up, vj_fast, aj_fast)
 
     # MidA/MidB (si la capa tiene mid definida)
     use_b = _is_group_b(side, layer, slot)
@@ -441,12 +794,12 @@ def do_place(side, layer, slot, rtype):
             tp_log("MidB en " + side + " L" + str(layer+1) + " S" + str(slot+1))
         else:
             tp_log("MidA en " + side + " L" + str(layer+1) + " S" + str(slot+1))
-        movej(pos=m, v=vj_fast, a=aj_fast)
+        movej(m, vj_fast, aj_fast)
 
     # Aproximación al slot (con offsets dx_app/dy_app/dz_app)
-    movel(pos=ap, v=vl_slow, a=al_slow, ref=ra)
+    movel(ap, v=vl_slow, a=al_slow, ref=ra)
     # Bajar a la posición exacta de PLACE
-    movel(pos=pl, v=vl_slow, a=al_slow, ref=rp)
+    movel(pl, v=vl_slow, a=al_slow, ref=rp)
 
     # Liberar según el tipo de pieza (full / half_a / half_b)
     if   rtype == "full":
@@ -457,12 +810,15 @@ def do_place(side, layer, slot, rtype):
         rel_half_b()
 
     # Retiro en línea
-    movel(pos=rt, v=vl_slow, a=al_slow, ref=rr)
+    movel(rt, v=vl_slow, a=al_slow, ref=rr)
     # Volver al hub del pallet
-    movej(pos=up, v=vj_fast, a=aj_fast)
+    movej(up, vj_fast, aj_fast)
 
-# Half-B prellenados al arrancar (para no repetirlos luego si ya estaban llenos)
-# Contiene tuplas (side, layer, slot) que ya recibieron un Half-B.
+# =====================================================================
+# Lógica Half-A / Half-B
+# =====================================================================
+
+# Destinos Half-B ya llenados (para no repetirlos)
 _halfB_filled = set()
 
 def do_half(side, layer, slot, is_half, dl, ds):
@@ -471,6 +827,7 @@ def do_half(side, layer, slot, is_half, dl, ds):
       - Si is_half == True:
           * SLOT actual es origen: se coloca Half-A ahí.
           * Luego se coloca Half-B en (dl,ds), si el destino es válido.
+          * Antes del Half-B, se ajusta el nivel del lifter según la cama destino.
       - Si is_half == False:
           * SLOT normal: se hace place full.
     """
@@ -479,7 +836,7 @@ def do_half(side, layer, slot, is_half, dl, ds):
         tp_log("Half-A: L" + str(layer+1) + " S" + str(slot+1) +
                " → L" + str(dl+1) + " S" + str(ds+1))
 
-        # Coloca Half-A en el slot origen
+        # 1) Half-A en el slot origen (nivel ya ajustado previamente para esta cama)
         do_place(side, layer, slot, "half_a")
 
         # Si el destino ya fue marcado como lleno antes, no repetir Half-B
@@ -495,9 +852,14 @@ def do_half(side, layer, slot, is_half, dl, ds):
             ok = (dl < len(right_layers) and ds < len(right_layers[dl]))
 
         if ok:
+            # *** Ajustar nivel del lifter para la cama DESTINO ***
+            dest_level = lifter_level_for_layer(dl)
+            lifter_set_level(side, dest_level)
+
             # Movernos al hub del lado antes de ir al destino Half-B
-            movej(pos=(up_right if side == "R" else up_left),
+            movej((up_right if side == "R" else up_left),
                   v=vj_slow, a=aj_slow)
+
             tp_log("Colocando Half-B en destino L" +
                    str(dl+1) + " S" + str(ds+1))
 
@@ -514,10 +876,13 @@ def do_half(side, layer, slot, is_half, dl, ds):
         do_place(side, layer, slot, "full")
 
 # =====================================================================
-# tp helpers (teach pendant)
+# tp helpers (Teach Pendant)
 # =====================================================================
+
 def clamp(val, lo, hi):
-    # Limita 'val' al rango [lo, hi]
+    """
+    Limita 'val' al rango [lo, hi].
+    """
     if val < lo: return lo
     if val > hi: return hi
     return val
@@ -554,8 +919,9 @@ def ask_slot(side, layer):
 # =====================================================================
 # helpers para lecturas posx/posj y safe_home
 # =====================================================================
+
 # Centro X aproximado de cada pallet para decidir qué hub usar
-_left_cx  = 250.0
+_left_cx  =  250.0
 _right_cx = -1266.0
 
 def _pal_hub(cx):
@@ -564,7 +930,10 @@ def _pal_hub(cx):
       - up_left  si está más cerca de _left_cx
       - up_right si está más cerca de _right_cx
     """
-    return up_left if abs(cx - _left_cx) <= abs(cx - _right_cx) else up_right
+    if abs(cx - _left_cx) <= abs(cx - _right_cx):
+        return up_left
+    else:
+        return up_right
 
 def _get_posx_only():
     """
@@ -605,7 +974,6 @@ def _is_home():
             abs(jcur[4] - home[4]) <= tol_j_deg and
             abs(jcur[5] - home[5]) <= tol_j_deg)
 
-# ------------------- safe home logic (cuadrantes) -------------------
 def safe_home():
     """
     Lógica de retorno seguro a HOME:
@@ -620,7 +988,8 @@ def safe_home():
 
     # Obtener pose actual
     cur = _get_posx_only()
-    cx, cy, cz = cur[0], cur[1], cur[2]
+    cx = cur[0]
+    cy = cur[1]
 
     # Subir en Z 100mm en base (movimiento relativo)
     pz = posx(0, 0, 100, 0, 0, 0, rot_mode)
@@ -628,16 +997,17 @@ def safe_home():
 
     # Decidir hub según el cuadrante (Y positiva => pallets)
     if cy > 0:
-        movej(pos=_pal_hub(cx), v=vj_slow, a=aj_slow)
+        movej(_pal_hub(cx), v=vj_slow, a=aj_slow)
     else:
-        movej(pos=up_conv, v=vj_slow, a=aj_slow)
+        movej(up_conv, v=vj_slow, a=aj_slow)
 
     # Ir finalmente al home
-    movej(pos=home, v=vj_slow, a=aj_slow)
+    movej(home, v=vj_slow, a=aj_slow)
 
 # =====================================================================
 # rutina: ejecutar desde (layer,slot) hasta acabar el lado
 # =====================================================================
+
 def run_from(side, start_layer, start_slot):
     """
     Ejecuta la secuencia completa de paletizado desde (start_layer,start_slot)
@@ -645,12 +1015,23 @@ def run_from(side, start_layer, start_slot):
     Respeta la lógica:
       - Saltar destinos Half-B (is_half_destination).
       - Ejecutar Half-A/B donde aplique (find_half + do_half).
+      - Seleccionar nivel del lifter por cama:
+          * L1-4 -> nivel 0
+          * L5-7 -> nivel 1 (+400)
+          * L8-9 -> nivel 2 (+400+270)
+      - Al terminar todas las camas de ESTE lado, baja lifter y restaura frames.
     """
     layers = left_layers if side == "L" else right_layers
     n_layers = len(layers)
     layer = start_layer
 
     while layer < n_layers:
+        # ------------------- LÓGICA LIFTER POR CAPA -------------------
+        # Según la cama en la que estemos, se define el nivel deseado:
+        lvl = lifter_level_for_layer(layer)
+        lifter_set_level(side, lvl)
+        # --------------------------------------------------------------
+
         n_slots = len(layers[layer])
         # En la capa de arranque se respeta start_slot, en las demás se empieza en 0
         s0 = start_slot if layer == start_layer else 0
@@ -659,7 +1040,7 @@ def run_from(side, start_layer, start_slot):
         while slot < n_slots:
             # Si el slot es un destino Half-B, se omite aquí
             if is_half_destination(side, layer, slot):
-                slot += 1
+                slot = slot + 1
                 continue
 
             tp_log("Colocando en " + side +
@@ -675,22 +1056,32 @@ def run_from(side, start_layer, start_slot):
             # Ejecutar lógica de Half o Full
             do_half(side, layer, slot, is_half, dl, ds)
 
-            slot += 1
-        layer += 1
+            slot = slot + 1
+        layer = layer + 1
+
+    # Al terminar TODAS las capas de este lado,
+    # asegurar que el lifter vuelva a nivel 0 y frames restaurados.
+    lifter_restore_frames()
 
 # =====================================================================
 # MAIN
 # =====================================================================
+
 def main():
     """
     Flujo principal del programa:
       - Configura TCP y tool_shape.
-      - Llama a safe_home.
+      - safe_home.
+      - Inicializa Lift100 (or_lift) de forma segura.
+      - Guarda frames originales para compensación del lifter.
       - Pregunta lado, cama y slot inicial al operador.
+      - Ajusta nivel del lifter para la cama inicial.
       - Maneja caso especial de arrancar en Half-B en ese lado.
       - Ejecuta la secuencia completa de ese lado.
       - Al terminar, ejecuta automáticamente el otro lado desde L1 S1.
-      - Regresa a home al final.
+      - Al finalizar todo:
+          * Restaura frames y baja lifter (si se subió).
+          * Regresa a home.
     """
     # Configuración de la herramienta (nombres ya definidos en el controlador)
     set_tcp("custom_gripper")
@@ -699,12 +1090,18 @@ def main():
     # Llevar al robot a home de forma segura
     safe_home()
 
+    # Asegurar que el Lift100 está inicializado antes de tocar frames
+    lifter_safe_init()
+
+    # Guardar poses originales de los frames para compensación del lifter
+    lifter_frames_init()
+
     # Preguntar lado, layer y slot de arranque
     side  = ask_side()
     layer = ask_layer(side)
     slot  = ask_slot(side, layer)
 
-    tp_log("Colocando en " + side +
+    tp_log("Inicio en " + side +
            " L" + str(layer+1) +
            " S" + str(slot+1))
 
@@ -715,6 +1112,10 @@ def main():
     if is_half_destination(side, layer, slot):
         tp_log("Arranque en Half-B: se toma media pieza y se coloca en este slot.")
 
+        # Ajustar nivel del lifter para esta cama
+        lvl0 = lifter_level_for_layer(layer)
+        lifter_set_level(side, lvl0)
+
         # Tomar sólo media pieza tipo B del conveyor
         do_pick("half_b")
         # Colocar Half-B en el slot seleccionado
@@ -724,13 +1125,14 @@ def main():
         _halfB_filled.add((side, layer, slot))
 
         # Definir el siguiente punto desde donde continuar en el mismo lado
-        next_layer, next_slot = layer, slot + 1
+        next_layer = layer
+        next_slot  = slot + 1
         layers = left_layers if side == "L" else right_layers
 
         # Manejar cambio de capa si se pasa del último slot
         if next_slot >= len(layers[layer]):
-            next_layer += 1
-            next_slot = 0
+            next_layer = next_layer + 1
+            next_slot  = 0
 
         # Si aún hay capas por procesar en este lado, continuar desde ahí
         if next_layer < len(layers):
@@ -741,11 +1143,19 @@ def main():
                other_side + " desde L1 S1.")
         run_from(other_side, 0, 0)
 
+        # Al final de TODO: restaurar frames y bajar lifter si está arriba
+        lifter_restore_frames()
+
         # Regresar a home y terminar
-        movej(pos=home, v=vj_fast, a=aj_slow, r=25)
+        movej(home, v=vj_fast, a=aj_slow, r=25)
         return
 
     # ----------------- CASO NORMAL: slot inicial NO es destino Half-B -----------------
+
+    # Ajustar nivel del lifter para la cama inicial
+    lvl0 = lifter_level_for_layer(layer)
+    lifter_set_level(side, lvl0)
+
     # Se toma pieza completa del conveyor
     do_pick("full")
 
@@ -761,7 +1171,12 @@ def main():
            other_side + " desde L1 S1.")
     run_from(other_side, 0, 0)
 
+    # Al final de TODO: restaurar frames y bajar lifter si está arriba
+    lifter_restore_frames()
+
     # Regresar a home al finalizar todo
-    movej(pos=home, v=vj_fast, a=aj_slow, r=25)
-    
+    movej(home, v=vj_fast, a=aj_slow, r=25)
+
+
+# Llamada principal
 main()
