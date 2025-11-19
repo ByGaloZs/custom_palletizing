@@ -4,9 +4,17 @@
 
 # ---------------------- frames ----------------------
 # ID de los frames enseñados en el controlador
-conv_frame = 101   # Frame del conveyor (pick)
-left_frame = 102   # Frame del pallet izquierdo
-right_frame = 103  # Frame del pallet derecho
+
+# Frames de TRABAJO (los que usa todo el programa para pick/place)
+conv_frame  = 101   # Frame del conveyor (pick) - TRABAJO
+left_frame  = 102   # Frame del pallet izquierdo - TRABAJO
+right_frame = 103   # Frame del pallet derecho - TRABAJO
+
+# Frames ORIGINALES nivel 0 (enseñados manualmente con el lifter abajo,
+# todo respecto al WORLD). Estos NUNCA se modifican desde código.
+conv_frame_orig  = 191   # conveyor original nivel 0
+left_frame_orig  = 192   # pallet izquierdo original nivel 0
+right_frame_orig = 193   # pallet derecho original nivel 0
 
 # ---------------------- parámetros globales ---------
 # Modo de orientación: FIX XYZ (RX, RY, RZ fijos, no ELR).
@@ -36,6 +44,9 @@ home = posj(-90.00, 0.00, 90.00, 0.00, 90.00, 90.00)
 up_conv  = posj(-57.60,   8.72, 80.72, 0.00, 90.55, 122.39)  # Hub sobre conveyor
 up_left  = posj(  4.58,  -8.86, 98.00, 0.00, 90.85,  94.58)  # Hub sobre pallet izquierdo
 up_right = posj(-175.42, -8.86, 98.01, 0.00, 90.86,  94.58)  # Hub sobre pallet derecho
+
+# Posición segura antes de bajar el lifter por completo.
+safe_pose = posj(0.00, 0.00, 0.00, 0.00, 0.00, 90.00)
 
 # ---------------------- I/O gripper -----------------
 # Definición de las salidas digitales que controlan el gripper
@@ -88,6 +99,66 @@ def rel_half_b():
     """
     set_digital_output(do_b, OFF)
     wait(0.15)
+
+
+# =====================================================================
+# Sensores de seguridad
+# =====================================================================
+
+# Ejemplo de mapeo futuro de DI (reemplazar con IDs reales):
+# di_conv_ready     = 10   # Conveyor listo (todas las cajas acomodadas)
+# di_conv_sensor_a  = 11   # Sensor A en conveyor (detección lado A)
+# di_conv_sensor_b  = 12   # Sensor B en conveyor (detección lado B)
+# di_pallet_left    = 20   # Limit switch pallet izquierdo presente
+# di_pallet_right   = 21   # Limit switch pallet derecho presente
+
+def wait_conveyor_ready():
+    """
+    Esperar a que el conveyor tenga lista la fila completa de cajas antes del pick.
+    De momento NO bloquea nada; la lógica con DI se deja comentada para futuro.
+    """
+    # while get_digital_input(di_conv_ready) == OFF:
+    #     tp_log("Esperando a que el conveyor esté listo...")
+    #     wait(0.2)
+    return
+
+def read_conv_box_state():
+    """
+    Determinar si la caja en conveyor es completa o media usando 2 sensores.
+    Devuelve string: "none" / "half" / "full".
+    Actualmente devuelve "full" para no modificar la lógica.
+    """
+    # sA = get_digital_input(di_conv_sensor_a)
+    # sB = get_digital_input(di_conv_sensor_b)
+    # if sA == OFF and sB == OFF:
+    #     return "none"
+    # if (sA == ON and sB == OFF) or (sA == OFF and sB == ON):
+    #     return "half"
+    # if sA == ON and sB == ON:
+    #     return "full"
+    return "full"
+
+def wait_remove_finished_pallet(side):
+    """
+    Espera a que retiren la tarima terminada del lado indicado ('L' o 'R').
+    Lógica con DI comentada para futura activación.
+    """
+    # di_pal = di_pallet_left if side == "L" else di_pallet_right
+    # while get_digital_input(di_pal) == ON:
+    #     tp_log("Esperando a que retiren la tarima del lado " + side + "...")
+    #     wait(0.5)
+    return
+
+def wait_new_pallet(side):
+    """
+    Espera a que coloquen una nueva tarima en el lado indicado ('L' o 'R').
+    Lógica con DI comentada para futura activación.
+    """
+    # di_pal = di_pallet_left if side == "L" else di_pallet_right
+    # while get_digital_input(di_pal) == OFF:
+    #     tp_log("Esperando nueva tarima en lado " + side + "...")
+    #     wait(0.5)
+    return
 
 
 # =====================================================================
@@ -144,9 +215,24 @@ def lifter_target_pos_for_level(level):
         return 670.0
     return 0.0
 
-# Estado actual del lifter y frames originales
-_lifter_level = 0      # nivel actual (0,1,2)
-_orig_frames  = {}     # poses originales de conv_frame, left_frame, right_frame
+
+def lifter_level_from_pos(pos):
+    """
+    Estima el nivel lógico (0,1,2) según la posición real [mm] del Lift100.
+    Ajusta los umbrales según los valores reales de tu instalación.
+    """
+    # Ejemplo: 0..200 => nivel 0, 200..540 => nivel 1, >540 => nivel 2
+    if pos < 200.0:
+        return 0
+    elif pos < 540.0:
+        return 1
+    else:
+        return 2
+
+
+# Estado actual del lifter (nivel lógico 0/1/2)
+_lifter_level = 0
+
 
 # ---------------------- helpers de seguridad Lift100 -----------------
 
@@ -214,20 +300,8 @@ def lifter_safe_init():
     else:
         tp_log("Lift100 inicializado correctamente.")
 
-# ---------------------- frames + nivel lifter ------------------------
 
-def lifter_frames_init():
-    """
-    Lee y guarda las poses originales de los frames que se van a compensar
-    cuando cambie el nivel del lifter. Se llama una vez al inicio del programa.
-    """
-    global _orig_frames, _lifter_level
-    _orig_frames = {}
-    for fid in (conv_frame, left_frame, right_frame):
-        pose, ref = get_user_cart_coord(fid)
-        _orig_frames[fid] = (pose, ref)
-    _lifter_level = 0
-    tp_log("Frames originales guardados para compensación de lifter.")
+# ---------------------- frames + nivel lifter ------------------------
 
 def _lifter_do_set_level(level):
     """
@@ -281,79 +355,95 @@ def _lifter_do_set_level(level):
     # Verificar posición final
     lifter_check_position(level)
 
-def lifter_set_level(side, level):
+
+def apply_level_to_frames(level):
     """
-    Cambia el nivel del lifter (0,1,2) y compensa frames:
-      - Siempre compensa el conveyor (conv_frame).
-      - Compensa SOLO el pallet del lado actual:
-          * side == "L" → left_frame
-          * side == "R" → right_frame
-      - El pallet del otro lado se mantiene en su pose original
-        (sin compensar).
-    El cálculo SIEMPRE parte de las poses originales (_orig_frames),
-    así evitamos acumulaciones numéricas.
+    A partir de los frames ORIGINALES nivel 0 (191, 192, 193),
+    escribe los frames de trabajo (101, 102, 103) compensando en Z
+    según el nivel lógico del lifter (0,1,2).
+
+    Regla:
+      new_z = z_original - offset(level)
+    donde offset(level) usa _level_offset(level).
     """
-    global _lifter_level
-    if level == _lifter_level:
-        return  # ya estamos en ese nivel
-
-    tp_log("Cambiando lifter a nivel " + str(level) +
-           " para lado " + side)
-
-    # Mover elevador físicamente
-    _lifter_do_set_level(level)
-
-    # Offset en Z (el lifter sube +dz, los frames bajan -dz)
     dz = _level_offset(level)
 
-    # Siempre compensar conveyor
-    pose_c, ref_c = _orig_frames[conv_frame]
-    new_c = posx(pose_c[0],
-                 pose_c[1],
-                 pose_c[2] - dz,
-                 pose_c[3],
-                 pose_c[4],
-                 pose_c[5],
-                 rot_mode)
-    overwrite_user_cart_coord(conv_frame, new_c, ref_c, DR_TEMPORARY)
+    # Lista de mapeos (frame_original -> frame_trabajo)
+    pairs = [
+        (conv_frame_orig,  conv_frame),
+        (left_frame_orig,  left_frame),
+        (right_frame_orig, right_frame)
+    ]
 
-    # Pallet del lado actual
-    pal_id = left_frame if side == "L" else right_frame
-    pose_p, ref_p = _orig_frames[pal_id]
-    new_p = posx(pose_p[0],
-                 pose_p[1],
-                 pose_p[2] - dz,
-                 pose_p[3],
-                 pose_p[4],
-                 pose_p[5],
-                 rot_mode)
-    overwrite_user_cart_coord(pal_id, new_p, ref_p, DR_TEMPORARY)
+    for f_orig, f_work in pairs:
+        pose_orig, ref_orig = get_user_cart_coord(f_orig)
 
-    # Pallet del otro lado se mantiene en pose original
-    other_id = right_frame if side == "L" else left_frame
-    pose_o, ref_o = _orig_frames[other_id]
-    overwrite_user_cart_coord(other_id, pose_o, ref_o, DR_TEMPORARY)
+        # Se mantiene X, Y, RX, RY, RZ; sólo se compensa Z
+        new_pose = posx(
+            pose_orig[0],              # X
+            pose_orig[1],              # Y
+            pose_orig[2] - dz,         # Z compensada
+            pose_orig[3],              # RX
+            pose_orig[4],              # RY
+            pose_orig[5],              # RZ
+            rot_mode
+        )
 
+        # Escribimos en el frame de TRABAJO correspondiente
+        overwrite_user_cart_coord(f_work, new_pose, ref_orig, DR_TEMPORARY)
+
+
+def lifter_set_level(side, level):
+    """
+    Mueve el lifter al nivel indicado (0,1,2) y ajusta SIEMPRE los frames
+    de TRABAJO (101,102,103) a partir de los frames ORIGINALES nivel 0
+    (191,192,193), sin modificar jamás los originales.
+
+    Pasos:
+      - Si el nivel ya es _lifter_level, no hace nada.
+      - Mueve físicamente el lifter al nivel deseado.
+      - Aplica la compensación de frames con apply_level_to_frames(level).
+      - Actualiza _lifter_level.
+    """
+    global _lifter_level
+
+    # Protección: si ya estamos en ese nivel lógico, no hacer nada
+    if level == _lifter_level:
+        tp_log("Lift100 ya en nivel lógico " + str(level) + ".")
+        return
+
+    tp_log("Cambiando lifter a nivel " + str(level) +
+           " (offset Z = " + str(_level_offset(level)) + " mm).")
+
+    # Mover físicamente el lifter
+    _lifter_do_set_level(level)
+
+    # Ajustar frames de trabajo en función de los frames originales
+    apply_level_to_frames(level)
+
+    # Actualizar estado lógico
     _lifter_level = level
+
 
 def lifter_restore_frames():
     """
-    Vuelve a nivel 0 (abajo) y restaura las poses originales
-    de conveyor y pallets. Es seguro llamarlo varias veces.
+    Restaura el sistema a nivel 0:
+      - Mueve físicamente el lifter a nivel 0.
+      - Aplica apply_level_to_frames(0) para que 101/102/103 coincidan
+        con los frames originales nivel 0.
+      - Actualiza _lifter_level = 0.
     """
     global _lifter_level
-    if _lifter_level == 0:
-        # Asegurar que el Lift100 también está realmente en 0 mm
-        _lifter_do_set_level(0)
-        return
 
-    tp_log("Restaurando nivel 0 de lifter y frames originales.")
+    # Mover lifter físicamente a nivel 0
     _lifter_do_set_level(0)
 
-    for fid, (pose, ref) in _orig_frames.items():
-        overwrite_user_cart_coord(fid, pose, ref, DR_TEMPORARY)
+    # Aplicar compensación de nivel 0 (sin desplazamiento en Z)
+    apply_level_to_frames(0)
 
+    # Estado lógico
     _lifter_level = 0
+
 
 
 # =====================================================================
@@ -790,6 +880,7 @@ def get_pick_ret():
 def do_pick(mode):
     """
     Secuencia completa de pick:
+      - Espera a que el conveyor esté listo (todas las cajas acomodadas).
       - Va a up_conv
       - Baja a APPROACH (pick_app)
       - Baja a PICK (pick_pose)
@@ -797,6 +888,16 @@ def do_pick(mode):
       - Sube a RETRACT (pick_ret)
       - Regresa a up_conv
     """
+    # 1) Esperar a que el conveyor reporte que la fila está completa (PLACEHOLDER)
+    wait_conveyor_ready()
+
+    # 2) (Futuro) decidir automáticamente half / full usando sensores A/B
+    # state = read_conv_box_state()
+    # if state == "half":
+    #     mode = "half_b"   # Ejemplo: tomar sólo media caja del conveyor
+    # elif state == "full":
+    #     mode = "full"
+
     # Ir al hub sobre el conveyor
     movej(up_conv, vj_fast, aj_fast, r=5)
 
@@ -1068,6 +1169,13 @@ def safe_home():
     # Ir finalmente al home
     movej(home, v=vj_slow, a=aj_slow)
 
+def go_safe_before_lifter():
+    """
+    Lleva al robot a 'safe_pose' antes de bajar completamente el lifter.
+    Se asume que safe_pose es un joint target seguro libre de obstáculos.
+    """
+    movej(safe_pose, v=vj_slow, a=aj_slow)
+
 # =====================================================================
 # rutina: ejecutar desde (layer,slot) hasta acabar el lado
 # =====================================================================
@@ -1083,7 +1191,10 @@ def run_from(side, start_layer, start_slot):
           * L1-4 -> nivel 0
           * L5-7 -> nivel 1 (+400)
           * L8-9 -> nivel 2 (+400+270)
-      - Al terminar todas las camas de ESTE lado, baja lifter y restaura frames.
+      - La ÚLTIMA CAJA DE LA CAMA 9 se coloca como Half-B (half_b) y sólo
+        toma media caja.
+    NOTA: Esta función YA NO baja el lifter ni restaura frames al final;
+          eso se hace fuera, al terminar el pallet completo.
     """
     layers = left_layers if side == "L" else right_layers
     n_layers = len(layers)
@@ -1091,7 +1202,6 @@ def run_from(side, start_layer, start_slot):
 
     while layer < n_layers:
         # ------------------- LÓGICA LIFTER POR CAPA -------------------
-        # Según la cama en la que estemos, se define el nivel deseado:
         lvl = lifter_level_for_layer(layer)
         lifter_set_level(side, lvl)
         # --------------------------------------------------------------
@@ -1107,25 +1217,36 @@ def run_from(side, start_layer, start_slot):
                 slot = slot + 1
                 continue
 
+            # --------- ÚLTIMA CAJA DE LA CAMA 9 = Half-B -------------
+            # layer == n_layers-1  → última cama (cama 9 en 1-based)
+            # slot  == n_slots-1  → último slot de esa cama
+            if (layer == n_layers - 1) and (slot == n_slots - 1):
+                tp_log("Última caja de la cama 9: sólo Half-B en " +
+                       side + " L" + str(layer+1) + " S" + str(slot+1))
+                # En el futuro se puede decidir half/full por sensores; por ahora se
+                # fuerza half_b.
+                do_pick("half_b")
+                do_place(side, layer, slot, "half_b")
+                slot = slot + 1
+                continue
+            # -----------------------------------------------------------
+
             tp_log("Colocando en " + side +
                    " L" + str(layer+1) +
                    " S" + str(slot+1))
 
-            # Siempre se toma pieza completa del conveyor
+            # Siempre se toma pieza completa del conveyor (salvo el caso especial c9)
             do_pick("full")
 
             # Verificar si es un origen Half (Half-A/B) o slot normal
-            is_half, dl, ds = find_half(side, layer, slot)
+            is_h, dl, ds = find_half(side, layer, slot)
 
             # Ejecutar lógica de Half o Full
-            do_half(side, layer, slot, is_half, dl, ds)
+            do_half(side, layer, slot, is_h, dl, ds)
 
             slot = slot + 1
         layer = layer + 1
 
-    # Al terminar TODAS las capas de este lado,
-    # asegurar que el lifter vuelva a nivel 0 y frames restaurados.
-    lifter_restore_frames()
 
 # =====================================================================
 # MAIN
@@ -1137,16 +1258,26 @@ def main():
       - Configura TCP y tool_shape.
       - safe_home.
       - Inicializa Lift100 (or_lift) de forma segura.
-      - Guarda frames originales para compensación del lifter.
+      - Lee la posición ACTUAL del Lift100 y deduce su nivel lógico (0,1,2).
+      - Aplica la compensación de frames de TRABAJO (101/102/103) a partir
+        de los frames ORIGINALES (191/192/193) según ese nivel.
       - Pregunta lado, cama y slot inicial al operador.
-      - Ajusta nivel del lifter para la cama inicial.
-      - Maneja caso especial de arrancar en Half-B en ese lado.
-      - Ejecuta la secuencia completa de ese lado.
-      - Al terminar, ejecuta automáticamente el otro lado desde L1 S1.
-      - Al finalizar todo:
-          * Restaura frames y baja lifter (si se subió).
+      - Lógica especial:
+          * Si arrancas en la ÚLTIMA caja de la cama 9 → sólo Half-B.
+          * Si arrancas en un destino Half-B → media caja y continuar.
+      - Ejecuta la secuencia completa de ese lado (run_from).
+      - Al terminar UN pallet:
+          * Va a safe_pose.
+          * (Futuro) espera a que retiren la tarima terminada.
+          * Baja lifter a nivel 0 y restaura frames de trabajo desde originales.
+          * (Futuro) espera nueva tarima en el otro lado.
+      - Ejecuta el otro lado completo desde L1 S1 con la misma lógica.
+      - Al final de TODO:
+          * safe_pose, retirar segunda tarima (futuro), lifter a 0 y frames originales.
           * Regresa a home.
     """
+    global _lifter_level
+
     # Configuración de la herramienta (nombres ya definidos en el controlador)
     set_tcp("custom_gripper")
     set_tool_shape("gripper_shape")
@@ -1157,8 +1288,26 @@ def main():
     # Asegurar que el Lift100 está inicializado antes de tocar frames
     lifter_safe_init()
 
-    # Guardar poses originales de los frames para compensación del lifter
-    lifter_frames_init()
+    # --------------------------------------------------------------
+    # NUEVA LÓGICA INICIAL:
+    #   - Leer posición actual del Lift100.
+    #   - Deducir nivel lógico (0/1/2) sin mover físicamente el lifter.
+    #   - Actualizar _lifter_level.
+    #   - Ajustar frames de trabajo 101/102/103 desde los originales
+    #     191/192/193 según ese nivel.
+    # --------------------------------------------------------------
+    if or_lift.isconn():
+        pos = or_lift.get_pos()
+        level_actual = lifter_level_from_pos(pos)
+        tp_log("Lift100 detectado en pos=" + str(pos) +
+               " mm, nivel lógico estimado=" + str(level_actual))
+    else:
+        tp_log("Lift100 no conectado al inicio: se asume nivel 0.")
+        level_actual = 0
+
+    _lifter_level = level_actual
+    apply_level_to_frames(level_actual)
+    # --------------------------------------------------------------
 
     # Preguntar lado, layer y slot de arranque
     side  = ask_side()
@@ -1172,7 +1321,45 @@ def main():
     # Determinar el otro lado para después
     other_side = "R" if side == "L" else "L"
 
-    # ----------------- CASO ESPECIAL: arrancar en Half-B -----------------
+    # Info de capas/slots para este lado
+    layers = left_layers if side == "L" else right_layers
+    n_layers = len(layers)
+    n_slots_in_layer = len(layers[layer])
+
+    # ---------- CASO ESPECIAL: arranque EXACTAMENTE en última caja de cama 9 ----------
+    if (layer == n_layers - 1) and (slot == n_slots_in_layer - 1):
+        tp_log("Arranque en última caja de la cama 9: sólo Half-B.")
+
+        lvl0 = lifter_level_for_layer(layer)
+        lifter_set_level(side, lvl0)
+
+        # Sólo media caja B en ese slot
+        do_pick("half_b")
+        do_place(side, layer, slot, "half_b")
+
+        # Cerrar lado inicial
+        tp_log("Lado " + side + " finalizado.")
+        go_safe_before_lifter()
+        # wait_remove_finished_pallet(side)  # TO_DO: descomentar cuando haya sensor
+        lifter_restore_frames()
+
+        # Esperar nueva tarima en el otro lado (PLACEHOLDER)
+        # wait_new_pallet(other_side)        # TO_DO: descomentar cuando haya sensor
+
+        # Ejecutar lado opuesto completo desde L1 S1
+        tp_log("Iniciando lado " + other_side + " desde L1 S1.")
+        run_from(other_side, 0, 0)
+
+        # Final del segundo lado
+        tp_log("Lado " + other_side + " finalizado.")
+        go_safe_before_lifter()
+        # wait_remove_finished_pallet(other_side)
+        lifter_restore_frames()
+
+        movej(home, v=vj_fast, a=aj_slow, r=25)
+        return
+
+    # ---------- CASO: slot inicial es destino Half-B (arranque en Half-B) ----------
     if is_half_destination(side, layer, slot):
         tp_log("Arranque en Half-B: se toma media pieza y se coloca en este slot.")
 
@@ -1191,10 +1378,7 @@ def main():
         # Definir el siguiente punto desde donde continuar en el mismo lado
         next_layer = layer
         next_slot  = slot + 1
-        layers = left_layers if side == "L" else right_layers
-
-        # Manejar cambio de capa si se pasa del último slot
-        if next_slot >= len(layers[layer]):
+        if next_slot >= n_slots_in_layer:
             next_layer = next_layer + 1
             next_slot  = 0
 
@@ -1202,15 +1386,22 @@ def main():
         if next_layer < len(layers):
             run_from(side, next_layer, next_slot)
 
-        # --------- AL TERMINAR ESTE LADO, EJECUTAR AUTOMÁTICAMENTE EL OTRO ---------
-        tp_log("Lado " + side + " finalizado. Iniciando lado " +
-               other_side + " desde L1 S1.")
+        # Cerrar lado 'side'
+        tp_log("Lado " + side + " finalizado.")
+        go_safe_before_lifter()
+        # wait_remove_finished_pallet(side)
+        lifter_restore_frames()
+        # wait_new_pallet(other_side)
+
+        # Ejecutar lado opuesto completo desde L1 S1
+        tp_log("Iniciando lado " + other_side + " desde L1 S1.")
         run_from(other_side, 0, 0)
 
-        # Al final de TODO: restaurar frames y bajar lifter si está arriba
+        tp_log("Lado " + other_side + " finalizado.")
+        go_safe_before_lifter()
+        # wait_remove_finished_pallet(other_side)
         lifter_restore_frames()
 
-        # Regresar a home y terminar
         movej(home, v=vj_fast, a=aj_slow, r=25)
         return
 
@@ -1220,7 +1411,7 @@ def main():
     lvl0 = lifter_level_for_layer(layer)
     lifter_set_level(side, lvl0)
 
-    # Se toma pieza completa del conveyor
+    # Primer slot del arranque: pieza completa
     do_pick("full")
 
     # Revisar si este slot es origen de Half-A/B
@@ -1230,12 +1421,19 @@ def main():
     # Continuar con el resto de slots a partir del siguiente en este lado
     run_from(side, layer, slot + 1)
 
-    # --------- AL TERMINAR ESTE LADO, EJECUTAR AUTOMÁTICAMENTE EL OTRO ---------
-    tp_log("Lado " + side + " finalizado. Iniciando lado " +
-           other_side + " desde L1 S1.")
+    # --------- AL TERMINAR ESTE LADO, PASAR AL OTRO ---------
+    tp_log("Lado " + side + " finalizado.")
+    go_safe_before_lifter()
+    # wait_remove_finished_pallet(side)
+    lifter_restore_frames()
+    # wait_new_pallet(other_side)
+
+    tp_log("Iniciando lado " + other_side + " desde L1 S1.")
     run_from(other_side, 0, 0)
 
-    # Al final de TODO: restaurar frames y bajar lifter si está arriba
+    tp_log("Lado " + other_side + " finalizado.")
+    go_safe_before_lifter()
+    # wait_remove_finished_pallet(other_side)
     lifter_restore_frames()
 
     # Regresar a home al finalizar todo
