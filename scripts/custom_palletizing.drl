@@ -41,9 +41,9 @@ vl_slow = 800;  al_slow = 800
 home = posj(-90.00, 0.00, 90.00, 0.00, 90.00, 90.00)
 
 # Posiciones "up" sobre zonas clave (hubs de seguridad):
-up_conv  = posj(-57.60,   8.72, 80.72, 0.00, 90.55, 122.39)  # Hub sobre conveyor
-up_left  = posj(  4.58,  -8.86, 98.00, 0.00, 90.85,  94.58)  # Hub sobre pallet izquierdo
-up_right = posj(-175.42, -8.86, 98.01, 0.00, 90.86,  94.58)  # Hub sobre pallet derecho
+up_conv  = posj(-80.61, 29.87, 65.62, 0.00, 84.50, 99.38)  # Hub sobre conveyor
+up_left  = posj(4.58, -8.86, 98.00, 0.00, 90.85, 94.58)  # Hub sobre pallet izquierdo
+up_right = posj(-175.42, -8.86, 98.01, 0.00, 90.86, 94.58)  # Hub sobre pallet derecho
 
 # Posición segura antes de bajar el lifter por completo.
 safe_pose = posj(0.00, 0.00, 0.00, 0.00, 0.00, 90.00)
@@ -857,7 +857,7 @@ def get_mid(side, layer, slot):
 # =====================================================================
 
 # Pose cartesiana del pick en el conveyor (en conv_frame)
-pick_pose = posx(402.00, -89.50, 320.00, 180.00, 0.00, 0.0, rot_mode)
+pick_pose = posx(422.00, -110.00, 810.00, 180.00, 0.00, 0.0, rot_mode)
 
 def get_pick():
     """
