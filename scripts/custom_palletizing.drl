@@ -104,61 +104,63 @@ def rel_half_b():
 # =====================================================================
 # Sensores de seguridad
 # =====================================================================
+# ---------------------- I/O pallets desde PLC ----------------------
+PALLET_LEFT_BIT  = 8   # Limit switch pallet izquierdo presente
+PALLET_RIGHT_BIT = 9   # Limit switch pallet derecho presente
+CONV_READY_BIT = 0   # Bit del PLC que indica "conveyor listo"
 
-# Ejemplo de mapeo futuro de DI (reemplazar con IDs reales):
-# di_conv_ready     = 10   # Conveyor listo (todas las cajas acomodadas)
-# di_conv_sensor_a  = 11   # Sensor A en conveyor (detección lado A)
-# di_conv_sensor_b  = 12   # Sensor B en conveyor (detección lado B)
-# di_pallet_left    = 20   # Limit switch pallet izquierdo presente
-# di_pallet_right   = 21   # Limit switch pallet derecho presente
+def _pallet_bit_index(side):
+    return PALLET_LEFT_BIT if side == "L" else PALLET_RIGHT_BIT
 
-def wait_conveyor_ready():
+def is_pallet_present(side):
     """
-    Esperar a que el conveyor tenga lista la fila completa de cajas antes del pick.
-    De momento NO bloquea nada; la lógica con DI se deja comentada para futuro.
+    Devuelve True si el pallet está presente en el lado indicado ('L' o 'R').
     """
-    # while get_digital_input(di_conv_ready) == OFF:
-    #     tp_log("Esperando a que el conveyor esté listo...")
-    #     wait(0.2)
-    return
+    bit_idx = _pallet_bit_index(side)
+    return get_input_register_bit(bit_idx) == ON
 
-def read_conv_box_state():
+def wait_pallet_present(side):
     """
-    Determinar si la caja en conveyor es completa o media usando 2 sensores.
-    Devuelve string: "none" / "half" / "full".
-    Actualmente devuelve "full" para no modificar la lógica.
+    Espera a que haya pallet presente en el lado indicado ('L' o 'R').
+
+    Se asume:
+      - bit == ON  -> hay tarima presente
+      - bit == OFF -> NO hay tarima
     """
-    # sA = get_digital_input(di_conv_sensor_a)
-    # sB = get_digital_input(di_conv_sensor_b)
-    # if sA == OFF and sB == OFF:
-    #     return "none"
-    # if (sA == ON and sB == OFF) or (sA == OFF and sB == ON):
-    #     return "half"
-    # if sA == ON and sB == ON:
-    #     return "full"
-    return "full"
+    bit_idx = _pallet_bit_index(side)
+
+    tp_log("Esperando tarima en lado " + side + "...")
+    while get_input_register_bit(bit_idx) == OFF:
+        wait(0.5)
+
+    tp_log("Tarima detectada en lado " + side + ".")
 
 def wait_remove_finished_pallet(side):
     """
     Espera a que retiren la tarima terminada del lado indicado ('L' o 'R').
-    Lógica con DI comentada para futura activación.
-    """
-    # di_pal = di_pallet_left if side == "L" else di_pallet_right
-    # while get_digital_input(di_pal) == ON:
-    #     tp_log("Esperando a que retiren la tarima del lado " + side + "...")
-    #     wait(0.5)
-    return
 
-def wait_new_pallet(side):
+    Se asume:
+      - bit == ON  -> hay tarima presente
+      - bit == OFF -> tarima retirada
     """
-    Espera a que coloquen una nueva tarima en el lado indicado ('L' o 'R').
-    Lógica con DI comentada para futura activación.
+    bit_idx = _pallet_bit_index(side)
+
+    tp_log("Esperando a que retiren la tarima del lado " + side + "...")
+    while get_input_register_bit(bit_idx) == ON:
+        wait(0.5)
+
+    tp_log("Tarima retirada en lado " + side + ".")
+
+def wait_conveyor_ready():
     """
-    # di_pal = di_pallet_left if side == "L" else di_pallet_right
-    # while get_digital_input(di_pal) == OFF:
-    #     tp_log("Esperando nueva tarima en lado " + side + "...")
-    #     wait(0.5)
-    return
+    Espera a que el PLC indique que la caja está lista para pick.
+    El bit CONV_READY_BIT debe permanecer en ON para continuar.
+    """
+    tp_log("Esperando conveyor listo para pick...")
+    while get_input_register_bit(CONV_READY_BIT) == OFF:
+        wait(0.2)
+    tp_log("Conveyor listo.")
+
 
 
 # =====================================================================
@@ -680,9 +682,6 @@ right_layers = [
 # Half plan (A→B)
 # =====================================================================
 # Cada tupla: (layer_origen, slot_origen, layer_destino_halfB, slot_destino_halfB)
-# Ejemplo (0,8,1,0):
-#   - Half-A se coloca en L1 S9 (layer=0, slot=8)
-#   - Half-B se coloca en L2 S1 (layer=1, slot=0)
 
 half_plan_left  = [(0,8,1,0), (2,8,3,0), (4,8,5,0), (6,8,7,0)]
 half_plan_right = [(0,8,1,0), (2,8,3,0), (4,8,5,0), (6,8,7,0)]
@@ -690,8 +689,6 @@ half_plan_right = [(0,8,1,0), (2,8,3,0), (4,8,5,0), (6,8,7,0)]
 # =====================================================================
 # Mid por capa (MidA / MidB) en joints
 # =====================================================================
-# MidA: joint targets intermedios por capa (para cada lado).
-# MidB: MidA con J6 rotado +90° (cambio de orientación de muñeca).
 
 mid_left_a = [
     posj(0.72, 58.86, 107.11, 0.00, 14.02, 0.72),
@@ -728,12 +725,6 @@ mid_left_b  = [ _rot_j6(j,  90.0) for j in mid_left_a  ]
 mid_right_b = [ _rot_j6(j,  90.0) for j in mid_right_a ]
 
 # ---------------------- mapa MidB configurable -------------
-# midB_map_left/right contiene (layer,slot) en 0-based que usarán MidB.
-# Todo lo demás usa MidA.
-# Regla:
-#  L1,3,5,7,9: slot 1 y 9 -> MidB, 2..8 MidA
-#  L2,4,6,8:   slots 1,2 -> MidB, 3..9 MidA
-
 midB_map_left = [
     (0,0), (0,8),
     (1,0), (1,1),
@@ -746,7 +737,6 @@ midB_map_left = [
     (8,0), (8,8)
 ]
 
-# Por defecto el Right usa el mismo patrón; se puede modificar más adelante.
 midB_map_right = list(midB_map_left)
 
 # =====================================================================
@@ -888,30 +878,19 @@ def do_pick(mode):
       - Sube a RETRACT (pick_ret)
       - Regresa a up_conv
     """
-    # 1) Esperar a que el conveyor reporte que la fila está completa (PLACEHOLDER)
     wait_conveyor_ready()
 
-    # 2) (Futuro) decidir automáticamente half / full usando sensores A/B
-    # state = read_conv_box_state()
-    # if state == "half":
-    #     mode = "half_b"   # Ejemplo: tomar sólo media caja del conveyor
-    # elif state == "full":
-    #     mode = "full"
-
     # Ir al hub sobre el conveyor
-    movej(up_conv, vj_fast, aj_fast, r=5)
+    movej(up_conv, vj_fast, aj_fast)
 
     # Calcular APPROACH, PICK y RETRACT (referenciados a conv_frame)
     a, _ = get_pick_app()
     p, _ = get_pick()
     r, _ = get_pick_ret()
 
-    # Aproximación lenta en línea
     movel(a, v=vl_slow, a=al_slow, ref=conv_frame)
-    # Bajar al pick
     movel(p, v=vl_slow, a=al_slow, ref=conv_frame)
 
-    # Selección del modo de agarre
     if mode == "full":
         grip_full()
     elif mode == "half_a":
@@ -919,11 +898,8 @@ def do_pick(mode):
     elif mode == "half_b":
         grip_half_b()
 
-    # Retiro en línea
     movel(r, v=vl_slow, a=al_slow, ref=conv_frame)
-
-    # Volver al hub del conveyor
-    movej(up_conv, vj_fast, aj_fast, r=5)
+    movej(up_conv, vj_fast, aj_fast)
 
 # =====================================================================
 # Place (full / half)
@@ -940,18 +916,14 @@ def do_place(side, layer, slot, rtype):
       - Sube a RETRACT
       - Regresa al hub del lado
     """
-    # Seleccionar hub según lado
     up = up_left if side == "L" else up_right
 
-    # Place, Approach y Retract en el frame del pallet
-    pl, rp = get_place(side, layer, slot)  # Pose de place y frame
-    ap, ra = get_app(side, layer, slot)    # Pose de approach y frame
-    rt, rr = get_ret(side, layer, slot)    # Pose de retract y frame
+    pl, rp = get_place(side, layer, slot)
+    ap, ra = get_app(side, layer, slot)
+    rt, rr = get_ret(side, layer, slot)
 
-    # Ir al hub del pallet
     movej(up, vj_fast, aj_fast)
 
-    # MidA/MidB (si la capa tiene mid definida)
     use_b = _is_group_b(side, layer, slot)
     m = get_mid(side, layer, slot)
     if not (m == None):
@@ -961,12 +933,9 @@ def do_place(side, layer, slot, rtype):
             tp_log("MidA en " + side + " L" + str(layer+1) + " S" + str(slot+1))
         movej(m, vj_fast, aj_fast)
 
-    # Aproximación al slot (con offsets dx_app/dy_app/dz_app)
     movel(ap, v=vl_slow, a=al_slow, ref=ra)
-    # Bajar a la posición exacta de PLACE
     movel(pl, v=vl_slow, a=al_slow, ref=rp)
 
-    # Liberar según el tipo de pieza (full / half_a / half_b)
     if   rtype == "full":
         rel_full()
     elif rtype == "half_a":
@@ -974,70 +943,50 @@ def do_place(side, layer, slot, rtype):
     elif rtype == "half_b":
         rel_half_b()
 
-    # Retiro en línea
     movel(rt, v=vl_slow, a=al_slow, ref=rr)
-    # Volver al hub del pallet
     movej(up, vj_fast, aj_fast)
 
 # =====================================================================
 # Lógica Half-A / Half-B
 # =====================================================================
 
-# Destinos Half-B ya llenados (para no repetirlos)
 _halfB_filled = set()
 
 def do_half(side, layer, slot, is_half, dl, ds):
     """
-    Maneja la lógica de Half-A / Half-B para un slot:
-      - Si is_half == True:
-          * SLOT actual es origen: se coloca Half-A ahí.
-          * Luego se coloca Half-B en (dl,ds), si el destino es válido.
-          * Antes del Half-B, se ajusta el nivel del lifter según la cama destino.
-      - Si is_half == False:
-          * SLOT normal: se hace place full.
+    Maneja la lógica de Half-A / Half-B para un slot.
     """
     if is_half:
-        # Mensaje: estamos colocando Half-A en el origen
         tp_log("Half-A: L" + str(layer+1) + " S" + str(slot+1) +
                " → L" + str(dl+1) + " S" + str(ds+1))
 
-        # 1) Half-A en el slot origen (nivel ya ajustado previamente para esta cama)
         do_place(side, layer, slot, "half_a")
 
-        # Si el destino ya fue marcado como lleno antes, no repetir Half-B
         if (side, dl, ds) in _halfB_filled:
             tp_log("Half-B destino ya estaba lleno. Omitiendo: L" +
                    str(dl+1) + " S" + str(ds+1))
             return
 
-        # Verificar que el destino existe en la tabla de layers/slots
         if side == "L":
             ok = (dl < len(left_layers) and ds < len(left_layers[dl]))
         else:
             ok = (dl < len(right_layers) and ds < len(right_layers[dl]))
 
         if ok:
-            # *** Ajustar nivel del lifter para la cama DESTINO ***
             dest_level = lifter_level_for_layer(dl)
             lifter_set_level(side, dest_level)
 
-            # Movernos al hub del lado antes de ir al destino Half-B
             movej((up_right if side == "R" else up_left),
                   v=vj_slow, a=aj_slow)
 
             tp_log("Colocando Half-B en destino L" +
                    str(dl+1) + " S" + str(ds+1))
 
-            # Coloca Half-B en el destino
             do_place(side, dl, ds, "half_b")
-
-            # Marcar destino como lleno (ya no repetir Half-B ahí)
             _halfB_filled.add((side, dl, ds))
         else:
-            # Fuera de rango → sólo se hace Half-A
             tp_log("Destino Half-B fuera de rango. Solo Half-A.")
     else:
-        # Slot normal: caja completa
         do_place(side, layer, slot, "full")
 
 # =====================================================================
@@ -1045,18 +994,11 @@ def do_half(side, layer, slot, is_half, dl, ds):
 # =====================================================================
 
 def clamp(val, lo, hi):
-    """
-    Limita 'val' al rango [lo, hi].
-    """
     if val < lo: return lo
     if val > hi: return hi
     return val
 
 def ask_side():
-    """
-    Pide al operador el lado (L/R).
-    Repite hasta que la entrada sea válida.
-    """
     s = tp_get_user_input("Lado L/R", DR_VAR_STR)
     if s == "L" or s == "l": return "L"
     if s == "R" or s == "r": return "R"
@@ -1064,18 +1006,12 @@ def ask_side():
     return ask_side()
 
 def ask_layer(side):
-    """
-    Pide la cama (1..N) según el lado, la convierte a índice 0-based.
-    """
     n = len(left_layers) if side == "L" else len(right_layers)
     v = tp_get_user_input("Cama 1.." + str(n), DR_VAR_INT)
     v = clamp(v, 1, n)
     return v - 1
 
 def ask_slot(side, layer):
-    """
-    Pide el slot (1..N) de la cama seleccionada, lo convierte a índice 0-based.
-    """
     n = len(left_layers[layer]) if side == "L" else len(right_layers[layer])
     v = tp_get_user_input("Slot 1.." + str(n), DR_VAR_INT)
     v = clamp(v, 1, n)
@@ -1085,26 +1021,16 @@ def ask_slot(side, layer):
 # helpers para lecturas posx/posj y safe_home
 # =====================================================================
 
-# Centro X aproximado de cada pallet para decidir qué hub usar
 _left_cx  =  250.0
 _right_cx = -1266.0
 
 def _pal_hub(cx):
-    """
-    Dado cx (X actual del TCP en base), decide a qué hub de pallet ir:
-      - up_left  si está más cerca de _left_cx
-      - up_right si está más cerca de _right_cx
-    """
     if abs(cx - _left_cx) <= abs(cx - _right_cx):
         return up_left
     else:
         return up_right
 
 def _get_posx_only():
-    """
-    Obtiene la pose cartesiana actual (posx).
-    Algunos firmwares devuelven (pose,ref), por eso se hace el try/except.
-    """
     res = get_current_posx()
     try:
         pose, _ = res
@@ -1113,10 +1039,6 @@ def _get_posx_only():
         return res
 
 def _get_posj_only():
-    """
-    Obtiene la pose articular actual (posj).
-    Algunos firmwares devuelven (joints,ref), por eso se hace el try/except.
-    """
     res = get_current_posj()
     try:
         j, _ = res
@@ -1124,13 +1046,9 @@ def _get_posj_only():
     except:
         return res
 
-# Tolerancia para considerar que está en HOME (en grados)
 tol_j_deg = 2.0
 
 def _is_home():
-    """
-    Comprueba si la posición actual de joints está cerca de 'home'.
-    """
     jcur = _get_posj_only()
     return (abs(jcur[0] - home[0]) <= tol_j_deg and
             abs(jcur[1] - home[1]) <= tol_j_deg and
@@ -1140,40 +1058,24 @@ def _is_home():
             abs(jcur[5] - home[5]) <= tol_j_deg)
 
 def safe_home():
-    """
-    Lógica de retorno seguro a HOME:
-      - Si ya está en home, no hace nada.
-      - Sube 100mm en Z relativo al frame base (para alejarse de obstáculos).
-      - Si Y > 0 (pallets): va al hub de pallet más cercano (left/right).
-      - Si Y <= 0 (conveyor): va a up_conv.
-      - Desde el hub, va a 'home'.
-    """
     if _is_home():
         return
 
-    # Obtener pose actual
     cur = _get_posx_only()
     cx = cur[0]
     cy = cur[1]
 
-    # Subir en Z 100mm en base (movimiento relativo)
     pz = posx(0, 0, 100, 0, 0, 0, rot_mode)
     movel(pz, time=2, ref=DR_BASE, mod=DR_MV_MOD_REL)
 
-    # Decidir hub según el cuadrante (Y positiva => pallets)
     if cy > 0:
         movej(_pal_hub(cx), v=vj_slow, a=aj_slow)
     else:
         movej(up_conv, v=vj_slow, a=aj_slow)
 
-    # Ir finalmente al home
     movej(home, v=vj_slow, a=aj_slow)
 
 def go_safe_before_lifter():
-    """
-    Lleva al robot a 'safe_pose' antes de bajar completamente el lifter.
-    Se asume que safe_pose es un joint target seguro libre de obstáculos.
-    """
     movej(safe_pose, v=vj_slow, a=aj_slow)
 
 # =====================================================================
@@ -1184,64 +1086,39 @@ def run_from(side, start_layer, start_slot):
     """
     Ejecuta la secuencia completa de paletizado desde (start_layer,start_slot)
     hasta completar todas las capas y slots del lado indicado.
-    Respeta la lógica:
-      - Saltar destinos Half-B (is_half_destination).
-      - Ejecutar Half-A/B donde aplique (find_half + do_half).
-      - Seleccionar nivel del lifter por cama:
-          * L1-4 -> nivel 0
-          * L5-7 -> nivel 1 (+400)
-          * L8-9 -> nivel 2 (+400+270)
-      - La ÚLTIMA CAJA DE LA CAMA 9 se coloca como Half-B (half_b) y sólo
-        toma media caja.
-    NOTA: Esta función YA NO baja el lifter ni restaura frames al final;
-          eso se hace fuera, al terminar el pallet completo.
     """
     layers = left_layers if side == "L" else right_layers
     n_layers = len(layers)
     layer = start_layer
 
     while layer < n_layers:
-        # ------------------- LÓGICA LIFTER POR CAPA -------------------
         lvl = lifter_level_for_layer(layer)
         lifter_set_level(side, lvl)
-        # --------------------------------------------------------------
 
         n_slots = len(layers[layer])
-        # En la capa de arranque se respeta start_slot, en las demás se empieza en 0
         s0 = start_slot if layer == start_layer else 0
         slot = s0
 
         while slot < n_slots:
-            # Si el slot es un destino Half-B, se omite aquí
             if is_half_destination(side, layer, slot):
                 slot = slot + 1
                 continue
 
-            # --------- ÚLTIMA CAJA DE LA CAMA 9 = Half-B -------------
-            # layer == n_layers-1  → última cama (cama 9 en 1-based)
-            # slot  == n_slots-1  → último slot de esa cama
             if (layer == n_layers - 1) and (slot == n_slots - 1):
                 tp_log("Última caja de la cama 9: sólo Half-B en " +
                        side + " L" + str(layer+1) + " S" + str(slot+1))
-                # En el futuro se puede decidir half/full por sensores; por ahora se
-                # fuerza half_b.
                 do_pick("half_b")
                 do_place(side, layer, slot, "half_b")
                 slot = slot + 1
                 continue
-            # -----------------------------------------------------------
 
             tp_log("Colocando en " + side +
                    " L" + str(layer+1) +
                    " S" + str(slot+1))
 
-            # Siempre se toma pieza completa del conveyor (salvo el caso especial c9)
             do_pick("full")
 
-            # Verificar si es un origen Half (Half-A/B) o slot normal
             is_h, dl, ds = find_half(side, layer, slot)
-
-            # Ejecutar lógica de Half o Full
             do_half(side, layer, slot, is_h, dl, ds)
 
             slot = slot + 1
@@ -1254,48 +1131,16 @@ def run_from(side, start_layer, start_slot):
 
 def main():
     """
-    Flujo principal del programa:
-      - Configura TCP y tool_shape.
-      - safe_home.
-      - Inicializa Lift100 (or_lift) de forma segura.
-      - Lee la posición ACTUAL del Lift100 y deduce su nivel lógico (0,1,2).
-      - Aplica la compensación de frames de TRABAJO (101/102/103) a partir
-        de los frames ORIGINALES (191/192/193) según ese nivel.
-      - Pregunta lado, cama y slot inicial al operador.
-      - Lógica especial:
-          * Si arrancas en la ÚLTIMA caja de la cama 9 → sólo Half-B.
-          * Si arrancas en un destino Half-B → media caja y continuar.
-      - Ejecuta la secuencia completa de ese lado (run_from).
-      - Al terminar UN pallet:
-          * Va a safe_pose.
-          * (Futuro) espera a que retiren la tarima terminada.
-          * Baja lifter a nivel 0 y restaura frames de trabajo desde originales.
-          * (Futuro) espera nueva tarima en el otro lado.
-      - Ejecuta el otro lado completo desde L1 S1 con la misma lógica.
-      - Al final de TODO:
-          * safe_pose, retirar segunda tarima (futuro), lifter a 0 y frames originales.
-          * Regresa a home.
+    Flujo principal del programa.
     """
     global _lifter_level
 
-    # Configuración de la herramienta (nombres ya definidos en el controlador)
     set_tcp("custom_gripper")
     set_tool_shape("gripper_shape")
 
-    # Llevar al robot a home de forma segura
     safe_home()
-
-    # Asegurar que el Lift100 está inicializado antes de tocar frames
     lifter_safe_init()
 
-    # --------------------------------------------------------------
-    # NUEVA LÓGICA INICIAL:
-    #   - Leer posición actual del Lift100.
-    #   - Deducir nivel lógico (0/1/2) sin mover físicamente el lifter.
-    #   - Actualizar _lifter_level.
-    #   - Ajustar frames de trabajo 101/102/103 desde los originales
-    #     191/192/193 según ese nivel.
-    # --------------------------------------------------------------
     if or_lift.isconn():
         pos = or_lift.get_pos()
         level_actual = lifter_level_from_pos(pos)
@@ -1307,9 +1152,7 @@ def main():
 
     _lifter_level = level_actual
     apply_level_to_frames(level_actual)
-    # --------------------------------------------------------------
 
-    # Preguntar lado, layer y slot de arranque
     side  = ask_side()
     layer = ask_layer(side)
     slot  = ask_slot(side, layer)
@@ -1318,10 +1161,13 @@ def main():
            " L" + str(layer+1) +
            " S" + str(slot+1))
 
-    # Determinar el otro lado para después
     other_side = "R" if side == "L" else "L"
 
-    # Info de capas/slots para este lado
+    # Asegurar pallet presente en el lado seleccionado
+    if not is_pallet_present(side):
+        tp_log("No hay tarima en el lado " + side + ". Esperando a que la coloquen...")
+        wait_pallet_present(side)
+
     layers = left_layers if side == "L" else right_layers
     n_layers = len(layers)
     n_slots_in_layer = len(layers[layer])
@@ -1333,112 +1179,105 @@ def main():
         lvl0 = lifter_level_for_layer(layer)
         lifter_set_level(side, lvl0)
 
-        # Sólo media caja B en ese slot
         do_pick("half_b")
         do_place(side, layer, slot, "half_b")
 
-        # Cerrar lado inicial
         tp_log("Lado " + side + " finalizado.")
         go_safe_before_lifter()
-        # wait_remove_finished_pallet(side)  # TO_DO: descomentar cuando haya sensor
+
+        wait_remove_finished_pallet(side)
         lifter_restore_frames()
 
-        # Esperar nueva tarima en el otro lado (PLACEHOLDER)
-        # wait_new_pallet(other_side)        # TO_DO: descomentar cuando haya sensor
+        # >>> NUEVO: asegurar tarima en el otro lado antes de iniciar <<<
+        if not is_pallet_present(other_side):
+            tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
+            wait_pallet_present(other_side)
 
-        # Ejecutar lado opuesto completo desde L1 S1
         tp_log("Iniciando lado " + other_side + " desde L1 S1.")
         run_from(other_side, 0, 0)
 
-        # Final del segundo lado
         tp_log("Lado " + other_side + " finalizado.")
         go_safe_before_lifter()
-        # wait_remove_finished_pallet(other_side)
+        wait_remove_finished_pallet(other_side)
         lifter_restore_frames()
 
-        movej(home, v=vj_fast, a=aj_slow, r=25)
+        movej(home, v=vj_fast, a=aj_slow)
         return
 
     # ---------- CASO: slot inicial es destino Half-B (arranque en Half-B) ----------
     if is_half_destination(side, layer, slot):
         tp_log("Arranque en Half-B: se toma media pieza y se coloca en este slot.")
 
-        # Ajustar nivel del lifter para esta cama
         lvl0 = lifter_level_for_layer(layer)
         lifter_set_level(side, lvl0)
 
-        # Tomar sólo media pieza tipo B del conveyor
         do_pick("half_b")
-        # Colocar Half-B en el slot seleccionado
         do_place(side, layer, slot, "half_b")
 
-        # Marcar este slot como destino ya lleno
         _halfB_filled.add((side, layer, slot))
 
-        # Definir el siguiente punto desde donde continuar en el mismo lado
         next_layer = layer
         next_slot  = slot + 1
         if next_slot >= n_slots_in_layer:
             next_layer = next_layer + 1
             next_slot  = 0
 
-        # Si aún hay capas por procesar en este lado, continuar desde ahí
         if next_layer < len(layers):
             run_from(side, next_layer, next_slot)
 
-        # Cerrar lado 'side'
         tp_log("Lado " + side + " finalizado.")
         go_safe_before_lifter()
-        # wait_remove_finished_pallet(side)
-        lifter_restore_frames()
-        # wait_new_pallet(other_side)
 
-        # Ejecutar lado opuesto completo desde L1 S1
+        wait_remove_finished_pallet(side)
+        lifter_restore_frames()
+
+        # asegurar tarima en el otro lado antes de iniciar <<<
+        if not is_pallet_present(other_side):
+            tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
+            wait_pallet_present(other_side)
+
         tp_log("Iniciando lado " + other_side + " desde L1 S1.")
         run_from(other_side, 0, 0)
 
         tp_log("Lado " + other_side + " finalizado.")
         go_safe_before_lifter()
-        # wait_remove_finished_pallet(other_side)
+        wait_remove_finished_pallet(other_side)
         lifter_restore_frames()
 
-        movej(home, v=vj_fast, a=aj_slow, r=25)
+        movej(home, v=vj_fast, a=aj_slow)
         return
 
     # ----------------- CASO NORMAL: slot inicial NO es destino Half-B -----------------
-
-    # Ajustar nivel del lifter para la cama inicial
     lvl0 = lifter_level_for_layer(layer)
     lifter_set_level(side, lvl0)
 
-    # Primer slot del arranque: pieza completa
     do_pick("full")
 
-    # Revisar si este slot es origen de Half-A/B
     is_half, dl, ds = find_half(side, layer, slot)
     do_half(side, layer, slot, is_half, dl, ds)
 
-    # Continuar con el resto de slots a partir del siguiente en este lado
     run_from(side, layer, slot + 1)
 
-    # --------- AL TERMINAR ESTE LADO, PASAR AL OTRO ---------
     tp_log("Lado " + side + " finalizado.")
     go_safe_before_lifter()
-    # wait_remove_finished_pallet(side)
+
+    wait_remove_finished_pallet(side)
     lifter_restore_frames()
-    # wait_new_pallet(other_side)
+
+    # >>> NUEVO: asegurar tarima en el otro lado antes de iniciar <<<
+    if not is_pallet_present(other_side):
+        tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
+        wait_pallet_present(other_side)
 
     tp_log("Iniciando lado " + other_side + " desde L1 S1.")
     run_from(other_side, 0, 0)
 
     tp_log("Lado " + other_side + " finalizado.")
     go_safe_before_lifter()
-    # wait_remove_finished_pallet(other_side)
+    wait_remove_finished_pallet(other_side)
     lifter_restore_frames()
 
-    # Regresar a home al finalizar todo
-    movej(home, v=vj_fast, a=aj_slow, r=25)
+    movej(home, v=vj_fast, a=aj_slow)
 
 
-# Llamada principal
 main()
