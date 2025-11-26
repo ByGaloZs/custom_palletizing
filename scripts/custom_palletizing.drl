@@ -31,8 +31,8 @@ dy_app = 0.0       # Offset en Y del APPROACH respecto al slot
 # ---------------------- velocidades -----------------
 # Velocidades y aceleraciones de joint (vj/aj) y lineales (vl/al)
 # Se separa en "rápido" y "lento" para pick/place.
-vj_fast = 80;  aj_fast = 80
-vj_slow = 60;  aj_slow = 60
+vj_fast = 60;  aj_fast = 50
+vj_slow = 40;  aj_slow = 30
 vl_fast = 1000; al_fast = 1000
 vl_slow = 800;  al_slow = 800
 
@@ -52,6 +52,10 @@ safe_pose = posj(0.00, 0.00, 0.00, 0.00, 0.00, 90.00)
 # Definición de las salidas digitales que controlan el gripper
 do_a = 1  # DO para "mitad A" o una vía del gripper
 do_b = 2  # DO para "mitad B" o la otra vía del gripper
+
+# Entradas digitales de retro de vacío
+di_vac_ok_a = 1    # DI para "vacío OK mitad A" 
+di_vac_ok_b = 2    # DI para "vacío OK mitad B" 
 
 # Funciones de control del gripper (FULL / HALF A / HALF B / RELEASE)
 def grip_full():
@@ -99,6 +103,77 @@ def rel_half_b():
     """
     set_digital_output(do_b, OFF)
     wait(0.15)
+
+
+# =====================================================================
+# Retroalimentación de vacío
+# =====================================================================
+# Mientras USE_VAC_FEEDBACK = False, el programa ignora estas DI de vacío
+USE_VAC_FEEDBACK = True   # Cambiar a True cuando para integracion
+
+def _vac_ok_a():
+    """
+    Devuelve True si la mitad A del gripper tiene vacío OK.
+
+    Lee directamente de una ENTRADA DIGITAL del robot:
+      di_vac_ok_a -> get_digital_input(di_vac_ok_a)
+    """
+    return get_digital_input(di_vac_ok_a) == ON
+
+def _vac_ok_b():
+    """
+    Devuelve True si la mitad B del gripper tiene vacío OK.
+
+    Lee directamente de una ENTRADA DIGITAL del robot:
+      di_vac_ok_b -> get_digital_input(di_vac_ok_b)
+    """
+    return get_digital_input(di_vac_ok_b) == ON
+
+def wait_vacuum_ok(mode, timeout=1.5):
+    """
+    Espera a que el gripper confirme vacío OK según el modo:
+      - "full"   -> A y B deben tener vacío
+      - "half_a" -> sólo A debe tener vacío
+      - "half_b" -> sólo B debe tener vacío
+
+    Si USE_VAC_FEEDBACK == False, siempre devuelve True (modo actual, sin sensores).
+
+    timeout en segundos: tiempo máximo para esperar vacío antes de considerar fallo.
+    """
+    if not USE_VAC_FEEDBACK:
+        # Modo actual: NO se verifica vacío, se asume OK
+        return True
+
+    need_a = (mode == "full" or mode == "half_a")
+    need_b = (mode == "full" or mode == "half_b")
+
+    t = 0.0
+    dt = 0.05
+
+    while t < timeout:
+        ok_a = (not need_a) or _vac_ok_a()
+        ok_b = (not need_b) or _vac_ok_b()
+
+        if ok_a and ok_b:
+            return True
+
+        wait(dt)
+        t = t + dt
+
+    # Si llega aquí, no hubo vacío suficiente
+    tp_log("ADVERTENCIA: fallo de vacío en modo '" + mode + "'.")
+    return False
+
+def rel_by_mode(mode):
+    """
+    Libera el gripper según el modo de pick usado.
+    """
+    if mode == "full":
+        rel_full()
+    elif mode == "half_a":
+        rel_half_a()
+    elif mode == "half_b":
+        rel_half_b()
 
 
 # =====================================================================
@@ -869,37 +944,81 @@ def get_pick_ret():
 
 def do_pick(mode):
     """
-    Secuencia completa de pick:
+    Secuencia completa de pick con reintento por fallo de vacío:
+
       - Espera a que el conveyor esté listo (todas las cajas acomodadas).
       - Va a up_conv
       - Baja a APPROACH (pick_app)
       - Baja a PICK (pick_pose)
       - Activa el gripper según el modo (full/half_a/half_b)
-      - Sube a RETRACT (pick_ret)
-      - Regresa a up_conv
+      - Espera retro de vacío (si USE_VAC_FEEDBACK == True)
+        - Si hay vacío OK -> sube (RETRACT) y vuelve a up_conv
+        - Si NO hay vacío -> suelta, sube y reintenta UNA vez más
+      - Después de 2 intentos fallidos, deja log de error.
+
+    Devuelve True si hubo vacío OK, False si falló después de 2 intentos.
     """
-    wait_conveyor_ready()
+    attempts = 0
+    max_attempts = 2
 
-    # Ir al hub sobre el conveyor
-    movej(up_conv, vj_fast, aj_fast)
+    while attempts < max_attempts:
+        attempts = attempts + 1
 
-    # Calcular APPROACH, PICK y RETRACT (referenciados a conv_frame)
-    a, _ = get_pick_app()
-    p, _ = get_pick()
-    r, _ = get_pick_ret()
+        # 1) Esperar conveyor listo
+        wait_conveyor_ready()
 
-    movel(a, v=vl_slow, a=al_slow, ref=conv_frame)
-    movel(p, v=vl_slow, a=al_slow, ref=conv_frame)
+        # 2) Ir al hub sobre el conveyor
+        movej(up_conv, vj_fast, aj_fast)
 
-    if mode == "full":
-        grip_full()
-    elif mode == "half_a":
-        grip_half_a()
-    elif mode == "half_b":
-        grip_half_b()
+        # 3) Calcular APPROACH, PICK y RETRACT (referenciados a conv_frame)
+        a, _ = get_pick_app()
+        p, _ = get_pick()
+        r, _ = get_pick_ret()
 
-    movel(r, v=vl_slow, a=al_slow, ref=conv_frame)
-    movej(up_conv, vj_fast, aj_fast)
+        # 4) Bajar a APPROACH y luego a PICK
+        movel(a, v=vl_slow, a=al_slow, ref=conv_frame)
+        movel(p, v=vl_slow, a=al_slow, ref=conv_frame)
+
+        # 5) Activar gripper según el modo
+        if mode == "full":
+            grip_full()
+        elif mode == "half_a":
+            grip_half_a()
+        elif mode == "half_b":
+            grip_half_b()
+        else:
+            tp_log("Modo de pick desconocido: " + str(mode))
+
+        # 6) Esperar vacío OK (si está habilitado)
+        if wait_vacuum_ok(mode, timeout=1.5):
+            # ÉXITO: subir y salir
+            movel(r, v=vl_slow, a=al_slow, ref=conv_frame)
+            movej(up_conv, vj_fast, aj_fast)
+
+            if attempts > 1:
+                tp_log("Pick recuperado en intento " + str(attempts) +
+                       " (modo=" + mode + ").")
+            return True
+
+        # 7) Si llegamos aquí, FALLO DE VACÍO en este intento
+        tp_log("Fallo de vacío en intento " + str(attempts) +
+               " (modo=" + mode + "). Reintentando...")
+
+        # Soltar la caja en la posición de pick
+        rel_by_mode(mode)
+
+        # Subir para despejar antes del siguiente intento
+        movel(r, v=vl_slow, a=al_slow, ref=conv_frame)
+        movej(up_conv, vj_fast, aj_fast)
+
+    # 8) Después de 2 intentos fallidos
+    tp_log("ERROR: fallo de vacío después de " +
+           str(max_attempts) + " intentos (modo=" + mode + ").")
+    # Aquí podrías parar el programa o levantar alarma
+    stop(DR_QSTOP)
+
+    return False
+
 
 # =====================================================================
 # Place (full / half)
@@ -1107,22 +1226,33 @@ def run_from(side, start_layer, start_slot):
             if (layer == n_layers - 1) and (slot == n_slots - 1):
                 tp_log("Última caja de la cama 9: sólo Half-B en " +
                        side + " L" + str(layer+1) + " S" + str(slot+1))
-                do_pick("half_b")
+
+                ok_pick = do_pick("half_b")
+                if not ok_pick:
+                    tp_log("Abortando lado " + side +
+                           " por fallo de vacío en la última caja.")
+                    return
+
                 do_place(side, layer, slot, "half_b")
                 slot = slot + 1
                 continue
+
 
             tp_log("Colocando en " + side +
                    " L" + str(layer+1) +
                    " S" + str(slot+1))
 
-            do_pick("full")
+            #checar resultado del pick
+            ok_pick = do_pick("full")
+            if not ok_pick:
+                tp_log("Abortando lado " + side +
+                       " por fallo de vacío en L" + str(layer+1) +
+                       " S" + str(slot+1))
+                return  # salir de run_from, no ir a place
 
             is_h, dl, ds = find_half(side, layer, slot)
             do_half(side, layer, slot, is_h, dl, ds)
 
-            slot = slot + 1
-        layer = layer + 1
 
 
 # =====================================================================
@@ -1179,8 +1309,13 @@ def main():
         lvl0 = lifter_level_for_layer(layer)
         lifter_set_level(side, lvl0)
 
-        do_pick("half_b")
+        ok_pick = do_pick("half_b")
+        if not ok_pick:
+            tp_log("Abortando lado " + side +
+                   " por fallo de vacío en la última caja (arranque especial).")
+            return
         do_place(side, layer, slot, "half_b")
+
 
         tp_log("Lado " + side + " finalizado.")
         go_safe_before_lifter()
@@ -1188,7 +1323,7 @@ def main():
         wait_remove_finished_pallet(side)
         lifter_restore_frames()
 
-        # >>> NUEVO: asegurar tarima en el otro lado antes de iniciar <<<
+        # Asegurar tarima en el otro lado antes de iniciar 
         if not is_pallet_present(other_side):
             tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
             wait_pallet_present(other_side)
@@ -1211,8 +1346,13 @@ def main():
         lvl0 = lifter_level_for_layer(layer)
         lifter_set_level(side, lvl0)
 
-        do_pick("half_b")
+        ok_pick = do_pick("half_b")
+        if not ok_pick:
+            tp_log("Abortando lado " + side +
+                   " por fallo de vacío al arrancar en Half-B.")
+            return
         do_place(side, layer, slot, "half_b")
+
 
         _halfB_filled.add((side, layer, slot))
 
@@ -1251,7 +1391,12 @@ def main():
     lvl0 = lifter_level_for_layer(layer)
     lifter_set_level(side, lvl0)
 
-    do_pick("full")
+    ok_pick = do_pick("full")
+    if not ok_pick:
+        tp_log("Abortando lado " + side +
+               " por fallo de vacío en el slot inicial L" +
+               str(layer+1) + " S" + str(slot+1))
+        return
 
     is_half, dl, ds = find_half(side, layer, slot)
     do_half(side, layer, slot, is_half, dl, ds)
@@ -1264,7 +1409,7 @@ def main():
     wait_remove_finished_pallet(side)
     lifter_restore_frames()
 
-    # >>> NUEVO: asegurar tarima en el otro lado antes de iniciar <<<
+    # Asegurar tarima en el otro lado antes de iniciar
     if not is_pallet_present(other_side):
         tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
         wait_pallet_present(other_side)
