@@ -66,9 +66,19 @@ up_conv  = posj(-80.61, 29.87, 65.62, 0.00, 84.50, 99.38)   # Hub sobre conveyor
 up_left  = posj(4.58, -8.86, 98.00, 0.00, 90.85, 94.58)     # Hub sobre pallet izquierdo
 up_right = posj(-175.42, -8.86, 98.01, 0.00, 90.86, 94.58)  # Hub sobre pallet derecho
 
+
 # Posición segura antes de bajar el lifter por completo.
 # Esta postura busca minimizar riesgo de colisión cuando se mueve el Lift100.
 safe_pose = posj(0.00, 0.00, 0.00, 0.00, 0.00, 90.00)
+
+
+MAINT_PASSWORD = "1234"   # Cambia esta contraseña a la que acuerden
+maint_safe_pose = posj(90.00, 50.00, 115.00, 0, -75.00, 90.00)
+
+# Flag global: indica si se ha entrado en modo mantenimiento
+_in_maintenance = False
+
+
 
 # ---------------------- I/O gripper -----------------
 # Definición de las salidas digitales que controlan el gripper
@@ -80,6 +90,13 @@ do_b = 2  # DO para "mitad B" o la otra vía del gripper
 # Estas indican si hay vacío suficiente (pieza agarrada) en cada mitad.
 di_vac_ok_a = 1    # DI para "vacío OK mitad A" 
 di_vac_ok_b = 2    # DI para "vacío OK mitad B" 
+
+# ---------------------- PLC OUTPUT BITS ----------------------
+VAC_OK_BIT     = 0   # 1 = pick valido (hubo vacio)
+VAC_LOSS_BIT   = 1   # 1 = perdida de vacio en el place
+MAINT_BIT      = 2   # 1 = robot en modo mantenimiento
+PICK_MODE_REG  = 0   # Registro entero para modo de pick (0=idle,1=full,2=half_b)
+
 
 # Funciones de control del gripper (FULL / HALF A / HALF B / RELEASE)
 # Estas funciones encapsulan la lógica de encender/apagar las DO y agregar pequeñas esperas.
@@ -136,7 +153,7 @@ def rel_half_b():
 # =====================================================================
 # Mientras USE_VAC_FEEDBACK = False, el programa ignora estas DI de vacío
 # y asume que siempre se agarra correctamente la pieza.
-USE_VAC_FEEDBACK = False   # Cambiar a True cuando se integre retro de vacío real
+USE_VAC_FEEDBACK = True   # Cambiar a True cuando se integre retro de vacío real
 
 def _vac_ok_a():
     """
@@ -192,7 +209,6 @@ def wait_vacuum_ok(mode, timeout=1.5):
 
     # Si llega aquí, no hubo vacío suficiente dentro del timeout
     tp_log("ADVERTENCIA: fallo de vacío en modo '" + mode + "'.")
-    tp_popup("ADVERTENCIA: fallo de vacío en modo '" + mode + "'.", DR_PM_MESSAGE)
     return False
 
 def rel_by_mode(mode):
@@ -206,6 +222,24 @@ def rel_by_mode(mode):
     elif mode == "half_b":
         rel_half_b()
 
+def has_vacuum_for_mode(mode):
+    """Comprueba de forma instantánea si el vacío sigue siendo válido
+    para el modo indicado (full / half_a / half_b).
+
+    Si USE_VAC_FEEDBACK == False, devuelve siempre True para no cambiar
+    el comportamiento actual.
+    """
+    if not USE_VAC_FEEDBACK:
+        return True
+
+    need_a = (mode == "full") or (mode == "half_a")
+    need_b = (mode == "full") or (mode == "half_b")
+
+    ok_a = (not need_a) or _vac_ok_a()
+    ok_b = (not need_b) or _vac_ok_b()
+
+    return ok_a and ok_b
+
 
 # =====================================================================
 # Sensores de seguridad
@@ -214,8 +248,8 @@ def rel_by_mode(mode):
 # Estos bits vienen del PLC y representan sensores físicos de presencia de tarima
 # o estados de "conveyor listo".
 
-PALLET_LEFT_BIT  = 8   # Limit switch pallet izquierdo presente
-PALLET_RIGHT_BIT = 9   # Limit switch pallet derecho presente
+PALLET_LEFT_BIT  = 1   # Limit switch pallet izquierdo presente
+PALLET_RIGHT_BIT = 2   # Limit switch pallet derecho presente
 CONV_READY_BIT   = 0   # Bit del PLC que indica "conveyor listo"
 
 def _pallet_bit_index(side):
@@ -981,6 +1015,7 @@ def get_mid(side, layer, slot):
 # Pose cartesiana del pick en el conveyor (en conv_frame)
 pick_pose = posx(422.00, -110.00, 810.00, 180.00, 0.00, 0.0, rot_mode)
 
+
 def get_pick():
     """
     Devuelve la pose de pick y el frame del conveyor.
@@ -999,26 +1034,86 @@ def get_pick_ret():
     """
     return trans(pick_pose, mk_off(dz_ret), conv_frame, conv_frame), conv_frame
 
+def plc_set_pick_mode(mode):
+    """Envía al PLC el modo de pick como un entero.
+
+    Mapeo propuesto:
+      0 = idle
+      1 = full
+      2 = half_b
+
+    half_a NO se usa en el proceso actual.
+    """
+    if mode == "full":
+        val = 1
+    elif mode == "half_b":
+        val = 2
+    else:
+        # Cualquier otro valor (incluido "half_a") se mapea a 0
+        val = 0
+
+    tp_log("PLC pick_mode_cmd = " + str(val) + " (modo=" + str(mode) + ")")
+    set_output_register_int(PICK_MODE_REG, val)
+
+def plc_set_pick_vac_ok(ok_flag):
+    """
+    Bit que indica al PLC si el último pick tuvo vacío válido.
+
+      ok_flag = True  -> bit = 1 (vacío OK, pick válido)
+      ok_flag = False -> bit = 0 (sin vacío / pick fallido)
+    """
+    bit_val = 1 if ok_flag else 0
+    tp_log("PLC pick_vac_ok_bit = " + str(bit_val))
+    set_output_register_bit(VAC_OK_BIT, bit_val)
+
+
+
+def plc_set_vacuum_loss(flag):
+    """
+    Envía al PLC el estado de 'pérdida de vacío'.
+
+      flag = 0/False -> sin fallo / normal
+      flag = 1/True  -> pérdida de vacío detectada
+    """
+    bit_val = 1 if flag else 0
+    tp_log("PLC vac_loss_bit = " + str(bit_val))
+    set_output_register_bit(VAC_LOSS_BIT, bit_val)
+
+
+def plc_set_maintenance_state(is_on):
+    """
+    Envía al PLC si el robot está en modo mantenimiento.
+    """
+    bit_val = 1 if is_on else 0
+    tp_log("PLC maint_state_bit = " + str(bit_val))
+    set_output_register_bit(MAINT_BIT, bit_val)
+
+
+
 def do_pick(mode):
     """
-    Secuencia completa de pick con reintento por fallo de vacío:
+    Secuencia completa de pick con reintentos por fallo de vacío:
 
-      - Espera a que el conveyor esté listo (todas las cajas acomodadas).
-      - Va a up_conv
-      - Baja a APPROACH (pick_app)
-      - Baja a PICK (pick_pose)
-      - Activa el gripper según el modo (full/half_a/half_b)
-      - Espera retro de vacío (si USE_VAC_FEEDBACK == True)
-        - Si hay vacío OK -> sube (RETRACT) y vuelve a up_conv
-        - Si NO hay vacío -> suelta, sube y reintenta UNA vez más
-      - Después de 2 intentos fallidos, deja log de error y para el programa.
+      - Hace hasta 2 intentos automáticos.
+      - Si falla esos 2 intentos:
+          * Pregunta UNA SOLA VEZ si quiere reintentar.
+          * Si el usuario elige reintentar:
+                - Se permiten otros 2 intentos.
+          * Si vuelve a fallar estos 2 intentos, o el usuario elige no reintentar:
+                - Se llama a modo mantenimiento (contraseña, sin pallets, etc.).
 
-    Devuelve True si hubo vacío OK, False si falló después de 2 intentos.
+    Devuelve True si hubo vacío OK, False si se entra a modo mantenimiento.
     """
-    attempts = 0
-    max_attempts = 2  # número máximo de reintentos
+    # Avisar cómo se pretende hacer el pick (full / half_b)
+    plc_set_pick_mode(mode)
+    # Por defecto, asumimos que NO hay vacio valido hasta que se compruebe
+    plc_set_pick_vac_ok(False)
 
-    while attempts < max_attempts:
+    attempts = 0
+    max_attempts = 2              # intentos por ronda
+    extra_retry_used = False      # solo se permite una ronda extra
+
+    while True:
         attempts = attempts + 1
 
         # 1) Esperar conveyor listo
@@ -1027,7 +1122,7 @@ def do_pick(mode):
         # 2) Ir al hub sobre el conveyor
         movej(up_conv, vj_fast, aj_fast)
 
-        # 3) Calcular APPROACH, PICK y RETRACT (referenciados a conv_frame)
+        # 3) Calcular APPROACH, PICK y RETRACT
         a, _ = get_pick_app()
         p, _ = get_pick()
         r, _ = get_pick_ret()
@@ -1052,29 +1147,53 @@ def do_pick(mode):
             movel(r, v=vl_slow, a=al_slow, ref=conv_frame)
             movej(up_conv, vj_fast, aj_fast)
 
+            # Avisar al PLC que este pick fue valido (hubo vacio)
+            plc_set_pick_vac_ok(True)
             if attempts > 1:
                 tp_log("Pick recuperado en intento " + str(attempts) +
                        " (modo=" + mode + ").")
             return True
 
-        # 7) Si llegamos aquí, FALLO DE VACÍO en este intento
-        tp_log("Fallo de vacío en intento " + str(attempts) +
-               " (modo=" + mode + "). Reintentando...")
+        # 7) FALLO DE VACÍO en este intento
+        tp_log("Fallo de vacio en intento " + str(attempts) +
+               " (modo=" + mode + ").")
 
-        # Soltar la caja en la posición de pick
+        # Soltar la caja en la posición de pick y subir
         rel_by_mode(mode)
-
-        # Subir para despejar antes del siguiente intento
         movel(r, v=vl_slow, a=al_slow, ref=conv_frame)
         movej(up_conv, vj_fast, aj_fast)
 
-    # 8) Después de 2 intentos fallidos
-    tp_log("ERROR: fallo de vacío después de " +
-           str(max_attempts) + " intentos (modo=" + mode + ").")
-    # Aquí se decide parar el programa por seguridad
-    stop(DR_QSTOP)
+        # ¿Ya se terminaron los intentos de esta ronda?
+        if attempts >= max_attempts:
+            # Si ya usamos la ronda extra, se va directo a mantenimiento
+            if extra_retry_used:
+                tp_log("Fallo de vacio tras reintento extra. Llamando a mantenimiento.")
+                plc_set_pick_vac_ok(False)
+                go_to_maintenance_mode()
+                return False
 
-    return False
+            # Primera vez que fallan los max_attempts
+            tp_popup("Fallo de vacio en pick. Revise gripper y conveyor.", DR_PM_ALARM)
+            resp = tp_get_user_input("1=Reintentar una vez mas, 2=Llamar mantenimiento", DR_VAR_INT)
+            resp = clamp(resp, 1, 2)
+
+            if resp == 1:
+                tp_log("Operador eligio reintentar pick una vez mas.")
+                extra_retry_used = True
+                attempts = 0       # reseteamos contador para la nueva ronda
+                continue
+            else:
+                tp_log("Operador eligio llamar a mantenimiento tras fallo de vacio en pick.")
+                go_to_maintenance_mode()
+                plc_set_pick_vac_ok(False)
+                return False
+
+        # Si aún no se llegaron a los max_attempts de esta ronda,
+        # el while continua y se hace otro intento automáticamente.
+        tp_log("Reintentando pick (intento " +
+               str(attempts + 1) + " de " + str(max_attempts) + ").")
+
+
 
 
 # =====================================================================
@@ -1091,19 +1210,35 @@ def do_place(side, layer, slot, rtype):
       - Suelta tipo rtype (full/half_a/half_b)
       - Sube a RETRACT
       - Regresa al hub del lado
+
+    Además:
+      - Si se detectó pérdida de vacío ANTES de bajar al pallet,
+        después del place se avisa al PLC y se decide:
+            1 = Continuar
+            2 = Llamar mantenimiento
+
+    Devuelve:
+      True  -> place terminado y se puede continuar
+      False -> se llamó a mantenimiento y NO se debe seguir
     """
-    # Determinar hub según el lado
     up = up_left if side == "L" else up_right
 
-    # Obtener poses de place, approach y retract
     pl, rp = get_place(side, layer, slot)
     ap, ra = get_app(side, layer, slot)
     rt, rr = get_ret(side, layer, slot)
 
-    # Mover al hub
     movej(up, vj_fast, aj_fast)
 
-    # Determinar si este slot usa MidA o MidB
+    # 1) Detectar posible pérdida de vacío ANTES de bajar
+    lost_vacuum = False
+    if not has_vacuum_for_mode(rtype):
+        lost_vacuum = True
+        tp_log("Perdida de vacio detectada antes de place. side=" +
+               side + " layer=" + str(layer + 1) +
+               " slot=" + str(slot + 1) +
+               " tipo=" + str(rtype))
+
+    # 2) Place normal
     use_b = _is_group_b(side, layer, slot)
     m = get_mid(side, layer, slot)
     if not (m == None):
@@ -1113,21 +1248,44 @@ def do_place(side, layer, slot, rtype):
             tp_log("MidA en " + side + " L" + str(layer+1) + " S" + str(slot+1))
         movej(m, vj_fast, aj_fast)
 
-    # Bajar a approach y luego al punto de place
     movel(ap, v=vl_slow, a=al_slow, ref=ra)
     movel(pl, v=vl_slow, a=al_slow, ref=rp)
 
-    # Soltar según tipo de caja
     if   rtype == "full":
         rel_full()
     elif rtype == "half_a":
         rel_half_a()
     elif rtype == "half_b":
         rel_half_b()
+    else:
+        tp_log("WARNING: do_place con tipo desconocido: " + str(rtype))
 
-    # Subir a retract y regresar al hub
     movel(rt, v=vl_slow, a=al_slow, ref=rr)
     movej(up, vj_fast, aj_fast)
+
+    # 3) Si hubo pérdida de vacío, avisar al PLC y decidir
+    if lost_vacuum:
+        plc_set_vacuum_loss(1)
+
+        tp_popup("Perdida de vacio antes de place. Revise la tarima.", DR_PM_ALARM)
+        resp = tp_get_user_input("1=Continuar paletizado, 2=Llamar mantenimiento", DR_VAR_INT)
+        resp = clamp(resp, 1, 2)
+
+        if resp == 1:
+            tp_log("Operador eligio continuar tras perdida de vacio en place.")
+            plc_set_vacuum_loss(0)
+            return True
+        else:
+            tp_log("Operador eligio llamar a mantenimiento tras perdida de vacio en place.")
+            go_to_maintenance_mode()
+            return False
+
+    # Si no hubo pérdida de vacío, todo OK
+    return True
+
+
+
+
 
 # =====================================================================
 # Lógica Half-A / Half-B
@@ -1255,6 +1413,29 @@ def ask_slot(side, layer):
     v = clamp(v, 1, n)
     return v - 1  # Convertir a 0-based
 
+def ask_initial_action():
+    """
+    Menu inicial:
+      1 -> Home seguro
+      2 -> Mantenimiento
+      3 -> Paletizado
+    """
+    msg = "Seleccione accion inicial: 1=Home seguro, 2=Mantenimiento, 3=Paletizado"
+    v = tp_get_user_input(msg, DR_VAR_INT)
+    return clamp(v, 1, 3)
+
+
+def ask_home_followup_action():
+    """
+    Menu despues de hacer home seguro:
+      1 -> Mantenimiento
+      2 -> Paletizado
+    """
+    msg = "Seleccione accion: 1=Mantenimiento, 2=Paletizado"
+    v = tp_get_user_input(msg, DR_VAR_INT)
+    return clamp(v, 1, 2)
+
+
 # =====================================================================
 # helpers para lecturas posx/posj y safe_home
 # =====================================================================
@@ -1349,6 +1530,59 @@ def go_safe_before_lifter():
     """
     movej(safe_pose, v=vj_slow, a=aj_slow)
 
+def go_to_maintenance_mode():
+    """
+    Rutina de llamada a mantenimiento:
+      - Pide contraseña de mantenimiento (se repite hasta que sea correcta).
+      - Verifica que no haya pallets presentes (L/R).
+        * Si hay, pide retirar y espera a que los bits se apaguen.
+      - Lleva al robot a una pose segura para mover el lifter.
+      - Baja el lifter y restaura frames (nivel 0).
+      - Lleva al robot a la pose de mantenimiento.
+      - Detiene el programa.
+    """
+    global _in_maintenance
+
+    # 1) Pedir contraseña en bucle hasta que sea correcta
+    while True:
+        pwd = tp_get_user_input("Ingrese contrasena de mantenimiento", DR_VAR_STR)
+
+        if pwd == MAINT_PASSWORD:
+            tp_log("Contrasena de mantenimiento correcta. Entrando a modo mantenimiento.")
+            break
+
+        tp_popup("Contrasena incorrecta. Intente de nuevo.", DR_PM_ALARM)
+        tp_log("Contrasena de mantenimiento incorrecta. Reintentando...")
+
+    # Marcamos modo mantenimiento activo
+    _in_maintenance = True
+
+    # Avisar al PLC que estamos en modo mantenimiento
+    plc_set_maintenance_state(True)
+
+    # 2) Verificar pallets presentes
+    if is_pallet_present("L") or is_pallet_present("R"):
+        tp_popup("Retire ambas tarimas antes de mantenimiento.", DR_PM_WARNING)
+        tp_log("Esperando retiro de tarimas para mantenimiento.")
+
+        if is_pallet_present("L"):
+            wait_remove_finished_pallet("L")
+        if is_pallet_present("R"):
+            wait_remove_finished_pallet("R")
+
+    # 3) Ir a pose segura antes de mover el lifter
+    go_safe_before_lifter()
+
+    # 4) Bajar lifter y restaurar frames (nivel 0)
+    lifter_restore_frames()
+
+    # 5) Llevar al robot a la pose de mantenimiento
+    movej(maint_safe_pose, v=vj_slow, a=aj_slow)
+
+    tp_log("Robot en pose de mantenimiento. Programa detenido.")
+    stop(DR_QSTOP)
+
+
 # =====================================================================
 def finish_side(side):
     """
@@ -1359,6 +1593,10 @@ def finish_side(side):
       - Esperar a que la tarima sea retirada.
       - Restaurar frames y nivel lógico del lifter a 0.
     """
+    global _in_maintenance
+    if _in_maintenance:
+        tp_log("finish_side: omitido porque estamos en modo mantenimiento.")
+        return
     tp_log("Lado " + side + " finalizado.")
     go_safe_before_lifter()
 
@@ -1426,14 +1664,17 @@ def run_from(side, start_layer, start_slot):
                            " por fallo de vacío en la última caja.")
                     return
 
-                # Se coloca como Half-B en el último slot
-                do_place(side, layer, slot, "half_b")
-
-                tp_log("Última caja completada en " + side +
-                       " L" + str(layer+1) +
-                       " S" + str(slot+1) +
-                       ". Fin de run_from para este lado.")
+            # Se coloca como Half-B en el último slot
+            ok_last = do_place(side, layer, slot, "half_b")
+            if not ok_last:
+                tp_log("run_from: mantenimiento solicitado en ultima caja; se aborta lado.")
                 return
+
+            tp_log("Última caja completada en " + side +
+                " L" + str(layer+1) +
+                " S" + str(slot+1) +
+                ". Fin de run_from para este lado.")
+            return
 
             # ---- CASO GENERAL: cajas FULL / Half-A → Half-B ----
             tp_log("run_from: Colocando en " + side +
@@ -1451,7 +1692,11 @@ def run_from(side, start_layer, start_slot):
             # Determinar si este slot es Half (origen) y su destino
             is_h, dl, ds = find_half(side, layer, slot)
             # Ejecutar lógica de Half-A/Half-B o FULL
-            do_half(side, layer, slot, is_h, dl, ds)
+            ok_place = do_half(side, layer, slot, is_h, dl, ds)
+            if not ok_place:
+                tp_log("run_from: se salio por mantenimiento en " +
+                    side + " L" + str(layer+1) + " S" + str(slot+1))
+                return
 
             slot = slot + 1  # avanzar al siguiente slot
 
@@ -1476,6 +1721,8 @@ def run_side_once(side, layer, slot):
 
     NO toca el otro lado ni regresa a HOME.
     """
+    global _halfB_filled
+    _halfB_filled = set()
 
     layers = left_layers if side == "L" else right_layers
 
@@ -1506,7 +1753,11 @@ def run_side_once(side, layer, slot):
             return
 
         # Colocar Half-B en ese slot
-        do_place(side, layer, slot, "half_b")
+        ok2 = do_place(side, layer, slot, "half_b")
+        if not ok2:
+            tp_log("run_side_once: mantenimiento solicitado en ultima caja (arranque especial).")
+            finish_side(side)
+            return
 
         # Finalizar lado (posición segura + retirar tarima + restaurar frames/lifter)
         finish_side(side)
@@ -1529,12 +1780,17 @@ def run_side_once(side, layer, slot):
                    " por fallo de vacío al arrancar en Half-B.")
             finish_side(side)
             return
-
+            
         # Colocar Half-B en este slot
-        do_place(side, layer, slot, "half_b")
+        ok2 = do_place(side, layer, slot, "half_b")
+        if not ok2:
+            tp_log("run_side_once: mantenimiento solicitado al colocar Half-B inicial.")
+            finish_side(side)
+            return
 
         # Registrar este destino Half-B como lleno
         _halfB_filled.add((side, layer, slot))
+
 
         # Calcular el siguiente slot donde continuar
         next_layer = layer
@@ -1571,7 +1827,11 @@ def run_side_once(side, layer, slot):
     # Revisar si este slot inicial es Half-A y su destino
     is_half, dl, ds = find_half(side, layer, slot)
     # Ejecutar lógica FULL o Half-A/Half-B
-    do_half(side, layer, slot, is_half, dl, ds)
+    ok_place = do_half(side, layer, slot, is_half, dl, ds)
+    if not ok_place:
+        tp_log("run_side_once: se salio por mantenimiento en slot inicial.")
+        finish_side(side)
+        return
 
     # Correr el resto del lado desde el siguiente slot
     run_from(side, layer, slot + 1)
@@ -1588,48 +1848,82 @@ def main():
     """
     Flujo principal del programa.
 
-    Pasos principales:
-      - Configuración de TCP y tool shape.
-      - Llevar al robot a home de forma segura.
-      - Inicializar y sincronizar el lifter con frames.
-      - Preguntar al usuario:
-          * Modo (single / both)
-          * Lado inicial (A/B -> L/R)
-          * Cama y slot iniciales
-      - Ejecutar paletizado:
-          * Modo single: repetir tarimas en el mismo lado hasta que se pare el programa.
-          * Modo both: paletizar primero un lado y luego el otro.
-      - Al terminar: ir a HOME.
+    Flujo:
+      1) Inicializar TCP, tool y lifter, y sincronizar frames segun nivel actual.
+      2) Preguntar accion inicial:
+           1 = Home seguro
+           2 = Mantenimiento
+           3 = Paletizado
+      3) Si se elige Home seguro:
+           - Ejecutar safe_home()
+           - Preguntar:
+                1 = Mantenimiento
+                2 = Paletizado
+      4) Si se elige Mantenimiento (directo o despues de Home):
+           - Ejecutar go_to_maintenance_mode() y terminar.
+      5) Si se elige Paletizado:
+           - Entrar directo al flujo de paletizado
+             (preguntar modo, lado, cama, slot, etc.)
+           - SIN llamar a safe_home automaticamente.
     """
     global _lifter_level
 
-    # Configurar el TCP y la forma del tool (definidos en el controlador)
+    # ------------- Configuracion basica de herramienta -------------
     set_tcp("custom_gripper")
     set_tool_shape("gripper_shape")
 
-    # Llevar al home seguro antes de cualquier cosa
-    safe_home()
-    # Inicializar el lifter si es necesario
+    # ------------- Estado inicial hacia el PLC ---------------------
+    plc_set_maintenance_state(False)
+    plc_set_pick_vac_ok(False)
+    plc_set_vacuum_loss(False)
+    plc_set_pick_mode("idle")
+
+    # ------------- Inicializacion / sincronizacion del lifter ------
     lifter_safe_init()
 
-    # Detectar nivel actual del lifter y ajustar frames
     if or_lift.isconn():
         pos = or_lift.get_pos()
         level_actual = lifter_level_from_pos(pos)
         tp_log("Lift100 detectado en pos=" + str(pos) +
-               " mm, nivel lógico estimado=" + str(level_actual))
+               " mm, nivel logico estimado=" + str(level_actual))
     else:
         tp_log("Lift100 no conectado al inicio: se asume nivel 0.")
         level_actual = 0
 
-    # Actualizar estado lógico y compensar frames en función del nivel actual
     _lifter_level = level_actual
     apply_level_to_frames(level_actual)
 
-    # ---------------------- Selección de modo ----------------------
+    # ------------- Menu inicial: Home / Mantenimiento / Paletizado ---
+    action = ask_initial_action()
+
+    if action == 1:
+        # Home seguro primero (SOLO si el usuario lo pide)
+        safe_home()
+
+        # Despues de home: elegir entre Mantenimiento o Paletizado
+        next_action = ask_home_followup_action()
+        if next_action == 1:
+            # Mantenimiento
+            go_to_maintenance_mode()
+            return
+        # Si next_action == 2 -> Paletizado; continua mas abajo SIN safe_home
+
+    elif action == 2:
+        # Mantenimiento directo
+        go_to_maintenance_mode()
+        return
+
+    else:
+        # action == 3: Paletizado directo
+        # NO se llama safe_home aqui
+        tp_log("Accion inicial: paletizado directo (sin home seguro).")
+
+    # -----------------------------------------------------------------
+    # A partir de aqui: flujo normal de paletizado (igual que antes)
+    # -----------------------------------------------------------------
+
     mode = ask_mode()        # 'single' o 'both'
 
-    # ---------------------- Selección inicial de lado/cama/slot ----------------------
     side  = ask_side()       # 'L' o 'R'
     layer = ask_layer(side)  # 0-based
     slot  = ask_slot(side, layer)  # 0-based
@@ -1638,62 +1932,62 @@ def main():
            " L" + str(layer+1) +
            " S" + str(slot+1))
 
-    # Lado opuesto, usado para modo BOTH
     other_side = "R" if side == "L" else "L"
 
-    # ====================== MODO SINGLE: SOLO UN LADO ======================
     if mode == "single":
-        # Bucle infinito de tarimas en el MISMO lado.
-        # El programa seguirá paletizando nuevas tarimas mientras esté en RUN.
         while True:
             tp_log("Iniciando ciclo de tarima en lado " + side +
                    " desde L" + str(layer+1) +
                    " S" + str(slot+1))
 
-            # Ejecutar TODO el lado (con casos especiales incluidos)
             run_side_once(side, layer, slot)
 
-            # Al terminar:
-            # - Robot está en posición segura de retirada (finish_side)
-            # - Tarima fue retirada (finish_side)
-            # - Frames y lifter restaurados (nivel 0)
+            # Si durante el ciclo se entró a mantenimiento, salir del bucle
+            if _in_maintenance:
+                tp_log("Modo mantenimiento activo. Saliendo del bucle de tarimas (single).")
+                return
 
             tp_log("Esperando nueva tarima en lado " + side +
-                   " para iniciar una nueva paletización...")
+                   " para iniciar una nueva paletizacion...")
             tp_popup("Coloque una NUEVA tarima en el lado " + side +
                      " para continuar.", DR_PM_MESSAGE)
 
-            # Esperar a que coloquen una nueva tarima en el mismo lado
             wait_pallet_present(side)
 
-            # Reiniciar siempre desde L1 S1 para las siguientes tarimas
             layer = 0
             slot  = 0
             tp_log("Nueva tarima detectada en lado " + side +
                    ". Reiniciando desde L1 S1.")
 
-        # Nota: este while se rompe sólo si el usuario para el programa (STOP).
-
-    # ====================== MODO BOTH: AMBOS LADOS ======================
     else:
-        # 1) Primer lado: desde la cama/slot escogidos
         run_side_once(side, layer, slot)
 
-        # 2) Segundo lado: el opuesto, siempre desde L1 S1
+        # Si se activó mantenimiento en el primer lado, no seguimos
+        if _in_maintenance:
+            tp_log("Modo mantenimiento activo tras primer lado. No se paletiza el otro lado.")
+            return
+
         if not is_pallet_present(other_side):
             tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
-            tp_popup("No hay tarima esperando a que la coloquen...", DR_PM_MESSAGE)
+            tp_popup("Coloque una tarima en el lado " + other_side + " para continuar.", DR_PM_MESSAGE)
             wait_pallet_present(other_side)
 
         tp_log("Iniciando lado " + other_side + " desde L1 S1.")
-        # Correr todo el patrón en el lado opuesto desde la primera cama y slot 0
         run_from(other_side, 0, 0)
 
-        # Finalizar segundo lado (posición segura + retirar tarima + restaurar lifter/frames)
+
+        # Si durante el segundo lado se entró en mantenimiento, no hacemos finish_side ni home
+        if _in_maintenance:
+            tp_log("Modo mantenimiento activo durante el segundo lado. Saliendo sin finish_side.")
+            return
+
         finish_side(other_side)
 
-    # Al salir del modo (single interrumpido o both completado), ir a HOME
-    movej(home, v=vj_fast, a=aj_slow)
+    # Solo regresar a HOME si NO estamos en modo mantenimiento
+    if not _in_maintenance:
+        movej(home, v=vj_fast, a=aj_slow)
+    else:
+        tp_log("Modo mantenimiento activo. No se regresa a home.")
 
 
 # Llamada al MAIN para iniciar el flujo cuando se ejecuta el script.
