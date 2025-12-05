@@ -1294,6 +1294,9 @@ def do_place(side, layer, slot, rtype):
 # Conjunto que almacena qué destinos Half-B ya han sido llenados
 _halfB_filled = set()
 
+# Conjunto que almacena qué destinos Half-B ya han sido llenados
+_halfB_filled = set()
+
 def do_half(side, layer, slot, is_half, dl, ds):
     """
     Maneja la lógica de Half-A / Half-B para un slot.
@@ -1301,51 +1304,73 @@ def do_half(side, layer, slot, is_half, dl, ds):
     Si is_half == True:
       - Coloca una Half-A en el slot origen
       - Coloca la Half-B en el destino indicado por (dl, ds) si está disponible
+
     Si is_half == False:
       - Coloca una caja FULL normal en el slot.
+
+    Devuelve:
+      True  -> se puede continuar paletizando
+      False -> se pidió mantenimiento en algún place
     """
+    global _halfB_filled
+
     if is_half:
         # Log de la relación Half-A origen -> Half-B destino
         tp_log("Half-A: L" + str(layer+1) + " S" + str(slot+1) +
                " → L" + str(dl+1) + " S" + str(ds+1))
 
-        # Primero colocar Half-A en el origen
-        do_place(side, layer, slot, "half_a")
+        # 1) Colocar Half-A en el origen
+        ok_a = do_place(side, layer, slot, "half_a")
+        # Si en este place se pidió mantenimiento (pérdida de vacío + opción 2)
+        if not ok_a:
+            tp_log("do_half: mantenimiento solicitado al colocar Half-A.")
+            return False
 
-        # Verificar si el destino Half-B ya fue llenado antes
+        # 2) Verificar si el destino Half-B ya fue llenado antes
         if (side, dl, ds) in _halfB_filled:
             tp_log("Half-B destino ya estaba lleno. Omitiendo: L" +
                    str(dl+1) + " S" + str(ds+1))
-            return
+            return True  # No es error, simplemente no repetimos
 
-        # Verificar que el destino está dentro de rango en las tablas de layers
+        # 3) Verificar que el destino está dentro de rango en las tablas de layers
         if side == "L":
-            ok = (dl < len(left_layers) and ds < len(left_layers[dl]))
+            ok_dest = (dl < len(left_layers) and ds < len(left_layers[dl]))
         else:
-            ok = (dl < len(right_layers) and ds < len(right_layers[dl]))
+            ok_dest = (dl < len(right_layers) and ds < len(right_layers[dl]))
 
-        if ok:
-            # Ajustar nivel del lifter según la capa de destino
-            dest_level = lifter_level_for_layer(dl)
-            lifter_set_level(side, dest_level)
+        if not ok_dest:
+            tp_log("Destino Half-B fuera de rango. Solo Half-A en origen.")
+            return True  # No paramos el ciclo, solo avisamos
 
-            # Ir al hub del lado (izquierdo o derecho)
-            movej((up_right if side == "R" else up_left),
-                  v=vj_slow, a=aj_slow)
+        # 4) Ajustar nivel del lifter según la capa de destino
+        dest_level = lifter_level_for_layer(dl)
+        lifter_set_level(side, dest_level)
 
-            tp_log("Colocando Half-B en destino L" +
-                   str(dl+1) + " S" + str(ds+1))
+        # Ir al hub del lado (izquierdo o derecho)
+        movej((up_right if side == "R" else up_left),
+              v=vj_slow, a=aj_slow)
 
-            # Colocar la Half-B
-            do_place(side, dl, ds, "half_b")
+        tp_log("Colocando Half-B en destino L" +
+               str(dl+1) + " S" + str(ds+1))
 
-            # Registrar que este destino Half-B ya fue llenado
-            _halfB_filled.add((side, dl, ds))
-        else:
-            tp_log("Destino Half-B fuera de rango. Solo Half-A.")
+        # 5) Colocar la Half-B en el destino
+        ok_b = do_place(side, dl, ds, "half_b")
+        if not ok_b:
+            tp_log("do_half: mantenimiento solicitado al colocar Half-B.")
+            return False
+
+        # 6) Registrar que este destino Half-B ya fue llenado
+        _halfB_filled.add((side, dl, ds))
+        return True
+
     else:
-        # Si no es slot Half, colocar caja completa
-        do_place(side, layer, slot, "full")
+        # Si NO es slot Half, colocar caja completa
+        ok_full = do_place(side, layer, slot, "full")
+        if not ok_full:
+            tp_log("do_half: mantenimiento solicitado al colocar FULL.")
+            return False
+        return True
+
 
 # =====================================================================
 # tp helpers (Teach Pendant)
