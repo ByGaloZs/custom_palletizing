@@ -41,13 +41,8 @@ rot_mode = DR_FIX_XYZ
 
 # Offsets en Z para APPROACH y RETRACT con respecto al PLACE
 # Sirven para aproximarse y retirarse verticalmente del punto de contacto.
-dz_app = 150.0     # Distancia en Z para aproximación (APP) antes de llegar al punto de place/pick
+dz_app = 200.0     # Distancia en Z para aproximación (APP) antes de llegar al punto de place/pick
 dz_ret = 200.0     # Distancia en Z para retract (RET) después de soltar/tomar la caja
-
-# Offsets en X/Y sólo para APPROACH de PLACE (personalizables)
-# Actualmente no se usan (0), pero permiten acercarse por un lado si se desea.
-dx_app = 0.0       # Offset en X del APPROACH respecto al slot
-dy_app = 0.0       # Offset en Y del APPROACH respecto al slot
 
 # ---------------------- velocidades -----------------
 # Velocidades y aceleraciones de joint (vj/aj) y lineales (vl/al)
@@ -908,7 +903,7 @@ midB_map_left = [
 midB_map_right = list(midB_map_left)
 
 # =====================================================================
-# Utilidades geométricas
+# Utilidades geométricas (APPROACH / RETRACT)
 # =====================================================================
 
 def mk_off(dz):
@@ -918,12 +913,55 @@ def mk_off(dz):
     """
     return posx(0.0, 0.0, dz, 0.0, 0.0, 0.0, rot_mode)
 
-def mk_off_app():
+
+def _approach_offset(side, layer, slot):
     """
-    Offset sólo para APPROACH de PLACE: (dx_app, dy_app, dz_app).
-    Se suma al punto de place para generar el punto de aproximación.
+    Devuelve el offset (dx, dy) para el APPROACH del PLACE según:
+    - Lado (L/R)
+    - Cama impar/par
+    - Slot 1..9 (slot 9 tiene caso especial en ambos lados)
+
+    layer y slot son 0-based.
     """
-    return posx(dx_app, dy_app, dz_app, 0.0, 0.0, 0.0, rot_mode)
+    cama = layer + 1    # 1..9
+    pos  = slot + 1     # 1..9
+
+    # ================================
+    # LADO IZQUIERDO (L)
+    # ================================
+    if side == "L":
+        if cama % 2 == 1:   # camas 1,3,5,7,9
+            if pos == 9:
+                return (0.0, 50.0)      # slot final -> offset Y
+            else:
+                return (50.0, 0.0)      # slots 1..8 -> offset X
+        else:
+            # camas pares
+            return (-50.0, 0.0)
+
+    # ================================
+    # LADO DERECHO (R)
+    # ================================
+    if side == "R":
+        if cama % 2 == 1:   # camas 1,3,5,7,9
+            if pos == 9:
+                return (0.0, 50.0)
+            else:
+                return (-50.0, 0.0)
+        else:
+            # camas pares
+            return (+50.0, 0.0)
+
+    # Si por alguna razón el lado no es L/R:
+    return (0.0, 0.0)
+
+
+
+def mk_off_app(side, layer, slot):
+    dx, dy = _approach_offset(side, layer, slot)
+    return posx(dx, dy, dz_app, 0.0, 0.0, 0.0, rot_mode)
+
+
 
 def get_place(side, layer, slot):
     """
@@ -938,14 +976,11 @@ def get_place(side, layer, slot):
         p = right_layers[layer][slot]
         return posx(p[0], p[1], p[2], p[3], p[4], p[5], rot_mode), right_frame
 
+
 def get_app(side, layer, slot):
-    """
-    Calcula la pose de APPROACH a partir del PLACE:
-    PLACE + (dx_app, dy_app, dz_app) en el frame del pallet.
-    """
     pl, rf = get_place(side, layer, slot)
-    # trans(pl, offset, frame_origen, frame_destino)
-    return trans(pl, mk_off_app(), rf, rf), rf
+    return trans(pl, mk_off_app(side, layer, slot), rf, rf), rf
+
 
 def get_ret(side, layer, slot):
     """
@@ -954,6 +989,9 @@ def get_ret(side, layer, slot):
     """
     pl, rf = get_place(side, layer, slot)
     return trans(pl, mk_off(dz_ret), rf, rf), rf
+
+
+# --------- selección de Half A/B según tabla ----------
 
 def find_half(side, layer, slot):
     """
@@ -981,7 +1019,6 @@ def is_half_destination(side, layer, slot):
             return True
     return False
 
-# --------- selección de MidA / MidB según tabla ----------
 def _is_group_b(side, layer, slot):
     """
     Determina si este (layer,slot) debe usar MidB (J6 +90°)
@@ -1132,7 +1169,7 @@ def do_pick(mode):
         r, _ = get_pick_ret()
 
         # 4) Bajar a APPROACH y luego a PICK
-        movel(a, v=vl_slow, a=al_slow, ref=conv_frame)
+        movej(a, v=vj_slow, a=aj_slow, ref=conv_frame)
         movel(p, v=vl_slow, a=al_slow, ref=conv_frame)
 
         # 5) Activar gripper según el modo
@@ -1259,7 +1296,7 @@ def do_place(side, layer, slot, rtype):
             tp_log("MidA en " + side + " L" + str(layer+1) + " S" + str(slot+1))
         movej(m, vj_fast, aj_fast)
 
-    movel(ap, v=vl_slow, a=al_slow, ref=ra)
+    movej(ap, v=vj_slow, a=aj_slow, ref=ra)
     movel(pl, v=vl_slow, a=al_slow, ref=rp)
 
     # Soltar según tipo
@@ -1319,89 +1356,96 @@ def do_half(side, layer, slot, is_half, dl, ds):
     Maneja la lógica de Half-A / Half-B para un slot.
 
     Si is_half == True:
-      - Coloca una Half-A en el slot origen
-      - Coloca la Half-B en el destino indicado por (dl, ds) si está disponible.
+      - Coloca una mitad en el slot origen
+      - Coloca la otra mitad en el destino (dl, ds), si procede.
 
-      Comportamiento especial:
-        - Si en la Half-A hubo pérdida de vacío ANTES del place y el operador
-          eligió CONTINUAR, se considera completado el origen y
-          NO se intenta colocar la Half-B. Se sigue con el siguiente slot
-          (el próximo movimiento relevante será un pick).
+    IMPORTANTE (por espejo físico):
+      Lado izquierdo  (side == "L"):
+        - Origen  -> Half-A
+        - Destino -> Half-B
 
-    Si is_half == False:
-      - Coloca una caja FULL normal en el slot.
+      Lado derecho   (side == "R"):
+        - Origen  -> Half-B
+        - Destino -> Half-A
+
+    Si en el place de origen hay pérdida de vacío y el operador elige CONTINUAR,
+    se considera completado el origen y NO se intenta el destino.
     """
     global _halfB_filled
     global _last_place_lost_vacuum
 
     if is_half:
-        # Log de la relación Half-A origen -> Half-B destino
-        tp_log("Half-A: L" + str(layer+1) + " S" + str(slot+1) +
-               " → L" + str(dl+1) + " S" + str(ds+1))
+        # Decidir qué mitad va en origen/destino según el lado
+        if side == "L":
+            origin_rtype = "half_a"
+            dest_rtype   = "half_b"
+        else:  # side == "R"
+            origin_rtype = "half_b"
+            dest_rtype   = "half_a"
 
-        # 1) Colocar Half-A en el origen
-        ok_a = do_place(side, layer, slot, "half_a")
-        if not ok_a:
-            # Aquí sólo entra cuando el operador eligió mantenimiento
-            tp_log("do_half: mantenimiento solicitado al colocar Half-A.")
+        tp_log("Half: side=" + side +
+               " ORIG L" + str(layer+1) + " S" + str(slot+1) +
+               " (" + origin_rtype + ")" +
+               " -> DEST L" + str(dl+1) + " S" + str(ds+1) +
+               " (" + dest_rtype + ")")
+
+        # 1) Colocar mitad en el ORIGEN
+        ok_origin = do_place(side, layer, slot, origin_rtype)
+        if not ok_origin:
+            tp_log("do_half: mantenimiento solicitado al colocar mitad de origen.")
             return False
 
-        # Si en este place hubo pérdida de vacío y el operador eligió CONTINUAR,
-        # NO intentamos la Half-B; se sigue con el siguiente slot (siguiente pick).
+        # Si hubo pérdida de vacío y el operador eligió continuar,
+        # NO intentamos la segunda mitad.
         if _last_place_lost_vacuum:
-            tp_log("do_half: perdida de vacio en Half-A, operador continuo. "
-                   "Se omite Half-B y se continua con siguiente slot.")
+            tp_log("do_half: perdida de vacio en origen, operador continuo. "
+                   "Se omite destino y se continua con siguiente slot.")
             return True
 
-        # 2) Verificar si el destino Half-B ya fue llenado antes
+        # 2) Verificar si el DESTINO ya fue llenado antes
         if (side, dl, ds) in _halfB_filled:
-            tp_log("Half-B destino ya estaba lleno. Omitiendo: L" +
-                   str(dl+1) + " S" + str(ds+1))
-            return True  # No es error, simplemente no repetimos
+            tp_log("Destino Half ya estaba lleno. Omitiendo: side=" + side +
+                   " L" + str(dl+1) + " S" + str(ds+1))
+            return True
 
-        # 3) Verificar que el destino está dentro de rango
+        # 3) Comprobar que el destino es válido en la tabla
         if side == "L":
             ok_dest = (dl < len(left_layers) and ds < len(left_layers[dl]))
         else:
             ok_dest = (dl < len(right_layers) and ds < len(right_layers[dl]))
 
         if not ok_dest:
-            tp_log("Destino Half-B fuera de rango. Solo Half-A en origen.")
-            return True  # No paramos el ciclo, solo avisamos
+            tp_log("Destino Half fuera de rango. Solo se coloca la mitad de origen.")
+            return True
 
-        # 4) Ajustar nivel del lifter según la capa de destino
+        # 4) Ajustar nivel de lifter para la capa de destino
         dest_level = lifter_level_for_layer(dl)
         lifter_set_level(side, dest_level)
 
-        # Ir al hub del lado
         movej((up_right if side == "R" else up_left),
               v=vj_slow, a=aj_slow)
 
-        tp_log("Colocando Half-B en destino L" +
-               str(dl+1) + " S" + str(ds+1))
+        tp_log("Colocando mitad destino en side=" + side +
+               " L" + str(dl+1) + " S" + str(ds+1) +
+               " (" + dest_rtype + ")")
 
-        # 5) Colocar la Half-B en el destino
-        ok_b = do_place(side, dl, ds, "half_b")
-        if not ok_b:
-            tp_log("do_half: mantenimiento solicitado al colocar Half-B.")
+        ok_dest_place = do_place(side, dl, ds, dest_rtype)
+        if not ok_dest_place:
+            tp_log("do_half: mantenimiento solicitado al colocar mitad de destino.")
             return False
 
-        # Registrar que este destino Half-B ya fue llenado
+        # Registrar este destino como lleno
         _halfB_filled.add((side, dl, ds))
         return True
 
     else:
-        # NO es slot Half → caja FULL normal
+        # NO es slot Half: caja FULL normal
         ok_full = do_place(side, layer, slot, "full")
         if not ok_full:
-            # Aquí sólo entra si el operador decidió mantenimiento
             tp_log("do_half: mantenimiento solicitado al colocar FULL.")
             return False
 
-        # Si hubo pérdida de vacío en este FULL y el operador eligió continuar,
-        # simplemente se considera "good place" y el flujo seguirá al siguiente pick.
         return True
-
 
 
 # =====================================================================
@@ -1694,6 +1738,7 @@ def finish_side(side):
 
     tp_popup("Retire la tarima terminada del lado " + side + ".", DR_PM_MESSAGE)
     wait_remove_finished_pallet(side)
+    tp_popup("Cuidado! El paletizado continuará", DR_PM_WARNING)
 
     lifter_restore_frames()
 
@@ -1826,6 +1871,7 @@ def run_side_once(side, layer, slot):
         tp_log("No hay tarima en el lado " + side + ". Esperando a que la coloquen...")
         tp_popup("No hay tarima esperando a que la coloquen...", DR_PM_MESSAGE)
         wait_pallet_present(side)
+        tp_popup("Cuidado! El paletizado continuará", DR_PM_WARNING)
 
     n_layers = len(layers)
     n_slots_in_layer = len(layers[layer])
@@ -2048,6 +2094,7 @@ def main():
                      " para continuar.", DR_PM_MESSAGE)
 
             wait_pallet_present(side)
+            tp_popup("Cuidado! El paletizado continuará", DR_PM_WARNING)
 
             layer = 0
             slot  = 0
@@ -2066,6 +2113,7 @@ def main():
             tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
             tp_popup("Coloque una tarima en el lado " + other_side + " para continuar.", DR_PM_MESSAGE)
             wait_pallet_present(other_side)
+            tp_popup("Cuidado! El paletizado continuará", DR_PM_WARNING)
 
         tp_log("Iniciando lado " + other_side + " desde L1 S1.")
         run_from(other_side, 0, 0)
