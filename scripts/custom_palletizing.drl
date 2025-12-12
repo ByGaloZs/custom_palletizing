@@ -90,11 +90,31 @@ do_b = 2  # DO para "mitad B" o la otra vía del gripper
 di_vac_ok_a = 1    # DI para "vacío OK mitad A" 
 di_vac_ok_b = 2    # DI para "vacío OK mitad B" 
 
-# ---------------------- PLC OUTPUT BITS ----------------------
-VAC_OK_BIT     = 0   # 1 = pick valido (hubo vacio)
-VAC_LOSS_BIT   = 1   # 1 = perdida de vacio en el place
-MAINT_BIT      = 2   # 1 = robot en modo mantenimiento
-PICK_MODE_REG  = 0   # Registro entero para modo de pick (0=idle,1=full,2=half_b)
+# ---------------------- PLC OUTPUT (Robot -> PLC) ----------------------
+# IMPORTANT:
+# - Robot State (%ID344) is mapped to Output INT Register 0
+# - Pick Mode   (%ID348) is mapped to Output INT Register 1
+# - Vacuum State bits are mapped to Output BIT Register 0..1
+#
+# See: "PLC Signal Mapping.txt" for the official mapping.
+
+# Output INT registers
+ROBOT_STATE_REG = 0   # %ID344
+PICK_MODE_REG   = 1   # %ID348
+
+# Robot state values (INT)
+ROBOT_STATE_IDLE        = 0
+ROBOT_STATE_NORMAL      = 1   # palletizing (automatic cycle)
+ROBOT_STATE_STANDBY     = 2   # menus / selections / waiting for operator choice
+ROBOT_STATE_MANUAL      = 3   # manual action (RETIRAR TARIMA)
+ROBOT_STATE_MAINTENANCE = 4   # maintenance mode
+
+# Output BIT registers (Vacuum state)
+VAC_OK_BIT   = 0   # %I38.0 -> VACUUM OK
+VAC_LOST_BIT = 1   # %I38.1 -> VACUUM LOST
+
+# Optional status bit (kept from your script)
+MAINT_BIT = 2       # 1 = robot in maintenance mode (aux bit to PLC)
 
 
 # Funciones de control del gripper (FULL / HALF A / HALF B / RELEASE)
@@ -1075,6 +1095,53 @@ def get_pick_ret():
     """
     return trans(pick_pose, mk_off(dz_ret), conv_frame, conv_frame), conv_frame
 
+
+def plc_set_robot_state(state_int):
+    """Publish robot state to the PLC (Robot -> PLC INT %ID344).
+
+    NOTE:
+      - Maintenance mode has priority. Once _in_maintenance is True,
+        we do NOT allow other states (Standby/Normal/Manual/Idle) to overwrite it.
+    """
+    global _in_maintenance
+    if _in_maintenance and state_int != ROBOT_STATE_MAINTENANCE:
+        # Lock the state in MAINTENANCE until the program stops / resets.
+        return
+    tp_log("PLC robot_state = " + str(state_int))
+    set_output_register_int(ROBOT_STATE_REG, state_int)
+
+def plc_vacuum_idle():
+    """Clear vacuum status bits (no vacuum expected)."""
+    set_output_register_bit(VAC_OK_BIT, 0)
+    set_output_register_bit(VAC_LOST_BIT, 0)
+
+def plc_vacuum_ok():
+    """VACUUM OK (mutually exclusive with VACUUM LOST)."""
+    set_output_register_bit(VAC_OK_BIT, 1)
+    set_output_register_bit(VAC_LOST_BIT, 0)
+
+def plc_vacuum_lost():
+    """VACUUM LOST (mutually exclusive with VACUUM OK)."""
+    set_output_register_bit(VAC_OK_BIT, 0)
+    set_output_register_bit(VAC_LOST_BIT, 1)
+
+
+
+def plc_enter_maintenance():
+    """Force PLC outputs to MAINTENANCE and clear other transient states.
+
+    Call this anytime maintenance is requested, so:
+      - Robot state stays in MAINTENANCE.
+      - Vacuum bits are cleared (no stale VAC_LOST / VAC_OK).
+      - Pick mode is set to idle.
+      - Maintenance flag bit is asserted.
+    """
+    global _in_maintenance
+    _in_maintenance = True
+    plc_set_robot_state(ROBOT_STATE_MAINTENANCE)
+    plc_set_maintenance_state(True)
+    plc_vacuum_idle()
+    plc_set_pick_mode("idle")
 def plc_set_pick_mode(mode):
     """Envía al PLC el modo de pick como un entero.
 
@@ -1097,34 +1164,34 @@ def plc_set_pick_mode(mode):
     set_output_register_int(PICK_MODE_REG, val)
 
 def plc_set_pick_vac_ok(ok_flag):
+    """Backward-compatible helper.
+    True  -> VACUUM OK bit ON, VACUUM LOST bit OFF
+    False -> both bits OFF (idle)
     """
-    Bit que indica al PLC si el último pick tuvo vacío válido.
-
-      ok_flag = True  -> bit = 1 (vacío OK, pick válido)
-      ok_flag = False -> bit = 0 (sin vacío / pick fallido)
-    """
-    bit_val = 1 if ok_flag else 0
-    tp_log("PLC pick_vac_ok_bit = " + str(bit_val))
-    set_output_register_bit(VAC_OK_BIT, bit_val)
+    if ok_flag:
+        tp_log("PLC vacuum_state = OK")
+        plc_vacuum_ok()
+    else:
+        tp_log("PLC vacuum_state = IDLE")
+        plc_vacuum_idle()
 
 
 
 def plc_set_vacuum_loss(flag):
+    """Backward-compatible helper.
+    True  -> VACUUM LOST bit ON, VACUUM OK bit OFF
+    False -> VACUUM LOST bit OFF (idle)
     """
-    Envía al PLC el estado de 'pérdida de vacío'.
-
-      flag = 0/False -> sin fallo / normal
-      flag = 1/True  -> pérdida de vacío detectada
-    """
-    bit_val = 1 if flag else 0
-    tp_log("PLC vac_loss_bit = " + str(bit_val))
-    set_output_register_bit(VAC_LOSS_BIT, bit_val)
+    if flag:
+        tp_log("PLC vacuum_state = LOST")
+        plc_vacuum_lost()
+    else:
+        tp_log("PLC vacuum_state = IDLE")
+        plc_vacuum_idle()
 
 
 def plc_set_maintenance_state(is_on):
-    """
-    Envía al PLC si el robot está en modo mantenimiento.
-    """
+    """Publish maintenance flag bit to the PLC (aux bit)."""
     bit_val = 1 if is_on else 0
     tp_log("PLC maint_state_bit = " + str(bit_val))
     set_output_register_bit(MAINT_BIT, bit_val)
@@ -1199,6 +1266,9 @@ def do_pick(mode):
         tp_log("Fallo de vacio en intento " + str(attempts) +
                " (modo=" + mode + ").")
 
+        # Publish VACUUM LOST to the PLC (mutually exclusive with VACUUM OK)
+        plc_set_vacuum_loss(True)
+
         # Soltar la caja en la posición de pick y subir
         rel_by_mode(mode)
         movel(r, v=vl_slow, a=al_slow, ref=conv_frame)
@@ -1209,7 +1279,8 @@ def do_pick(mode):
             # Si ya usamos la ronda extra, se va directo a mantenimiento
             if extra_retry_used:
                 tp_log("Fallo de vacio tras reintento extra. Llamando a mantenimiento.")
-                plc_set_pick_vac_ok(False)
+                # Keep VACUUM LOST ON when the pick fails and we are going to maintenance
+                plc_set_vacuum_loss(True)
                 go_to_maintenance_mode()
                 return False
 
@@ -1225,8 +1296,8 @@ def do_pick(mode):
                 continue
             else:
                 tp_log("Operador eligio llamar a mantenimiento tras fallo de vacio en pick.")
+                plc_set_vacuum_loss(True)
                 go_to_maintenance_mode()
-                plc_set_pick_vac_ok(False)
                 return False
 
         # Si aún no se llegaron a los max_attempts de esta ronda,
@@ -1677,6 +1748,8 @@ def go_to_maintenance_mode():
     """
     global _in_maintenance
 
+    # Enter/lock maintenance immediately (clear other transient outputs)
+    plc_enter_maintenance()
     # 1) Pedir contraseña en bucle hasta que sea correcta
     while True:
         pwd = tp_get_user_input("Ingrese contrasena de mantenimiento", DR_VAR_STR)
@@ -1687,15 +1760,6 @@ def go_to_maintenance_mode():
 
         tp_popup("Contrasena incorrecta. Intente de nuevo.", DR_PM_ALARM)
         tp_log("Contrasena de mantenimiento incorrecta. Reintentando...")
-
-    # Marcamos modo mantenimiento activo
-    _in_maintenance = True
-
-    # Avisar al PLC que estamos en modo mantenimiento
-    plc_set_maintenance_state(True)
-    plc_set_pick_vac_ok(False)
-    plc_set_vacuum_loss(0)
-
     # 2) Verificar pallets presentes
     if is_pallet_present("L") or is_pallet_present("R"):
         tp_popup("Retire ambas tarimas antes de mantenimiento.", DR_PM_WARNING)
@@ -1711,7 +1775,6 @@ def go_to_maintenance_mode():
 
     # 4) Bajar lifter y restaurar frames (nivel 0)
     lifter_restore_frames()
-
     # 5) Llevar al robot a la pose de mantenimiento
     movej(maint_safe_pose, v=vj_slow, a=aj_slow)
 
@@ -1736,11 +1799,14 @@ def finish_side(side):
     tp_log("Lado " + side + " finalizado.")
     go_safe_before_lifter()
 
+    plc_set_robot_state(ROBOT_STATE_MANUAL)
     tp_popup("Retire la tarima terminada del lado " + side + ".", DR_PM_MESSAGE)
     wait_remove_finished_pallet(side)
     tp_popup("Cuidado! El paletizado continuará", DR_PM_WARNING)
 
     lifter_restore_frames()
+    # After manual pallet removal, we are back to standby (waiting / next decisions)
+    plc_set_robot_state(ROBOT_STATE_STANDBY)
 
 # =====================================================================
 # rutina: ejecutar desde (layer,slot) hasta acabar el lado
@@ -2014,6 +2080,7 @@ def main():
     set_tool_shape("gripper_shape")
 
     # ------------- Estado inicial hacia el PLC ---------------------
+    plc_set_robot_state(ROBOT_STATE_STANDBY)
     plc_set_maintenance_state(False)
     plc_set_pick_vac_ok(False)
     plc_set_vacuum_loss(False)
@@ -2069,6 +2136,8 @@ def main():
     layer = ask_layer(side)  # 0-based
     slot  = ask_slot(side, layer)  # 0-based
 
+    plc_set_robot_state(ROBOT_STATE_NORMAL)
+
     tp_log("Inicio en " + side +
            " L" + str(layer+1) +
            " S" + str(slot+1))
@@ -2081,8 +2150,10 @@ def main():
                    " desde L" + str(layer+1) +
                    " S" + str(slot+1))
 
-            run_side_once(side, layer, slot)
+            plc_set_robot_state(ROBOT_STATE_NORMAL)
 
+
+            run_side_once(side, layer, slot)
             # Si durante el ciclo se entró a mantenimiento, salir del bucle
             if _in_maintenance:
                 tp_log("Modo mantenimiento activo. Saliendo del bucle de tarimas (single).")
@@ -2102,6 +2173,7 @@ def main():
                    ". Reiniciando desde L1 S1.")
 
     else:
+        plc_set_robot_state(ROBOT_STATE_NORMAL)
         run_side_once(side, layer, slot)
 
         # Si se activó mantenimiento en el primer lado, no seguimos
@@ -2116,6 +2188,7 @@ def main():
             tp_popup("Cuidado! El paletizado continuará", DR_PM_WARNING)
 
         tp_log("Iniciando lado " + other_side + " desde L1 S1.")
+        plc_set_robot_state(ROBOT_STATE_NORMAL)
         run_from(other_side, 0, 0)
 
 
@@ -2129,6 +2202,9 @@ def main():
     # Solo regresar a HOME si NO estamos en modo mantenimiento
     if not _in_maintenance:
         movej(home, v=vj_fast, a=aj_slow)
+        plc_set_robot_state(ROBOT_STATE_IDLE)
+        plc_vacuum_idle()
+        plc_set_pick_mode("idle")
     else:
         tp_log("Modo mantenimiento activo. No se regresa a home.")
 
