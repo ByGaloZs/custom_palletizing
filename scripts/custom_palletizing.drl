@@ -319,6 +319,27 @@ def wait_remove_finished_pallet(side):
 
     tp_log("Tarima retirada en lado " + side + ".")
 
+
+def wait_no_pallets_present_both_sides():
+    """
+    Bloquea el movimiento del robot hasta que NO haya tarimas presentes
+    en ninguno de los dos lados.
+
+    Se usa principalmente al reiniciar el programa cuando el robot estaba
+    en MAINTENANCE: antes de permitir Home seguro, se verifica que ambas
+    estaciones estén libres.
+
+    Se asume:
+      - bit == ON  -> hay tarima presente
+      - bit == OFF -> NO hay tarima
+    """
+    while is_pallet_present("L") or is_pallet_present("R"):
+        msg = "RETIRE TARIMAS: No se permite movimiento hasta que ambos lados estén libres."
+        tp_popup(msg, DR_PM_WARNING)
+        tp_log("Bloqueo por tarimas presentes: L=" + str(is_pallet_present("L")) +
+               ", R=" + str(is_pallet_present("R")))
+        wait(0.5)
+
 def wait_conveyor_ready():
     """
     Espera a que el PLC indique que la caja está lista para pick.
@@ -581,8 +602,7 @@ def lifter_set_level(side, level):
       - Aplica la compensación de frames con apply_level_to_frames(level).
       - Actualiza _lifter_level.
     """
-    global _lifter_level
-
+    global _lifter_level, _in_maintenance
     # Protección: si ya estamos en ese nivel lógico, no hacer nada
     if level == _lifter_level:
         tp_log("Lift100 ya en nivel lógico " + str(level) + ".")
@@ -1097,17 +1117,26 @@ def get_pick_ret():
 
 
 def plc_set_robot_state(state_int):
-    """Publish robot state to the PLC (Robot -> PLC INT %ID344).
+    """Publica el estado del robot al PLC (Robot -> PLC INT %ID344).
 
-    NOTE:
-      - Maintenance mode has priority. Once _in_maintenance is True,
-        we do NOT allow other states (Standby/Normal/Manual/Idle) to overwrite it.
+    NOTA:
+      - El modo MANTENIMIENTO tiene prioridad. Una vez que _in_maintenance es True,
+        NO se permite que otros estados (StandBy/Normal/Manual/Idle) lo sobreescriban.
     """
     global _in_maintenance
     if _in_maintenance and state_int != ROBOT_STATE_MAINTENANCE:
-        # Lock the state in MAINTENANCE until the program stops / resets.
+        # Bloquea el estado en MANTENIMIENTO hasta que el programa se detenga / reinicie.
         return
-    tp_log("PLC robot_state = " + str(state_int))
+    tp_log("PLC estado_robot = " + str(state_int))
+    set_output_register_int(ROBOT_STATE_REG, state_int)
+
+def plc_force_robot_state(state_int):
+    """Fuerza la publicación del estado al PLC ignorando el 'lock' de mantenimiento.
+
+    Usar SOLO para movimientos controlados como Home seguro, donde queremos que el PLC
+    vea que el robot está en movimiento (NORMAL), y al final regresar a MANTENIMIENTO.
+    """
+    tp_log("PLC robot_state (FORZADO) = " + str(state_int))
     set_output_register_int(ROBOT_STATE_REG, state_int)
 
 def plc_vacuum_idle():
@@ -1136,10 +1165,21 @@ def plc_enter_maintenance():
       - Pick mode is set to idle.
       - Maintenance flag bit is asserted.
     """
-    global _in_maintenance
+    global _in_maintenance, System_InMaintenance
     _in_maintenance = True
+    System_InMaintenance = 1
     plc_set_robot_state(ROBOT_STATE_MAINTENANCE)
     plc_set_maintenance_state(True)
+    plc_vacuum_idle()
+    plc_set_pick_mode("idle")
+
+
+def plc_exit_maintenance():
+    """Clear maintenance latch (allows other states again)."""
+    global _in_maintenance, System_InMaintenance
+    System_InMaintenance = 0
+    _in_maintenance = False
+    plc_set_maintenance_state(False)
     plc_vacuum_idle()
     plc_set_pick_mode("idle")
 def plc_set_pick_mode(mode):
@@ -1237,6 +1277,7 @@ def do_pick(mode):
 
         # 4) Bajar a APPROACH y luego a PICK
         movej(a, v=vj_slow, a=aj_slow, ref=conv_frame)
+        set_tool("gripper_weight", 0.0, 0.2)
         movel(p, v=vl_slow, a=al_slow, ref=conv_frame)
 
         # 5) Activar gripper según el modo
@@ -1251,6 +1292,12 @@ def do_pick(mode):
 
         # 6) Esperar vacío OK (si está habilitado)
         if wait_vacuum_ok(mode, timeout=1.5):
+            if mode == "full":
+                set_tool("full_weight", 0.0, 0.3)
+            else:
+                set_tool("half_weight", 0.0, 0.3)
+            wait(0.3)
+
             # ÉXITO: subir y salir
             movel(r, v=vl_slow, a=al_slow, ref=conv_frame)
             movej(up_conv, vj_fast, aj_fast)
@@ -1562,6 +1609,35 @@ def ask_str_required(prompt):
         tp_log("ask_str_required: string vacio. Reintentando...")
 
 
+
+# ===================== SYSTEM PERSISTENT VARIABLES =====================
+# Variables persistentes en el controlador (prefijo System_)
+# Guardan el progreso por lado (independiente L/R).
+#
+# Nota: No se inicializan aqui para NO sobreescribir valores persistidos.
+# Se actualizan SOLO cuando el usuario selecciona inicio o cuando avanza el ciclo.
+
+def system_update_progress(side, layer, slot):
+    """Actualizar variables persistentes de progreso.
+
+    - System_Side: lado actual en ejecución ("L" o "R")
+    - System_Layer_L/System_Slot_L: progreso del lado izquierdo (0-based)
+    - System_Layer_R/System_Slot_R: progreso del lado derecho (0-based)
+    """
+    global System_Side, System_Layer_L, System_Slot_L, System_Layer_R, System_Slot_R
+
+    System_Side = side
+
+    if side == "L":
+        System_Layer_L = layer
+        System_Slot_L  = slot
+    else:
+        System_Layer_R = layer
+        System_Slot_R  = slot
+
+        tp_log("System progress -> side=" + str(side) + " layer=" + str(layer) + " slot=" + str(slot))
+
+
 def ask_mode():
     """
     Pregunta el modo de paletizado:
@@ -1747,9 +1823,14 @@ def go_to_maintenance_mode():
       - Detiene el programa.
     """
     global _in_maintenance
-
+    set_tool("gripper_weight", 0.0, 0.2)
+    rel_full()
     # Enter/lock maintenance immediately (clear other transient outputs)
     plc_enter_maintenance()
+    # Al entrar a mantenimiento, NO queremos estados transitorios activos
+    plc_set_pick_vac_ok(False)
+    plc_set_vacuum_loss(False)
+
     # 1) Pedir contraseña en bucle hasta que sea correcta
     while True:
         pwd = tp_get_user_input("Ingrese contrasena de mantenimiento", DR_VAR_STR)
@@ -1832,6 +1913,9 @@ def run_from(side, start_layer, start_slot):
            " inicio en L" + str(start_layer+1) +
            " S" + str(start_slot+1))
 
+    # Actualizar progreso persistente al inicio del ciclo
+    system_update_progress(side, start_layer, start_slot)
+
     # Bucle por capas
     while layer < n_layers:
         # Determinar nivel lógico del lifter para esta capa
@@ -1853,6 +1937,9 @@ def run_from(side, start_layer, start_slot):
                        str(layer+1) + " S" + str(slot+1))
                 slot = slot + 1
                 continue
+
+            # Actualizar progreso persistente para este slot
+            system_update_progress(side, layer, slot)
 
             # ---- CASO ESPECIAL: última caja de la cama 9 (solo Half-B) ----
             if (layer == n_layers - 1) and (slot == n_slots - 1):
@@ -2073,20 +2160,29 @@ def main():
              (preguntar modo, lado, cama, slot, etc.)
            - SIN llamar a safe_home automaticamente.
     """
-    global _lifter_level
+    global _lifter_level, _in_maintenance, System_InMaintenance
 
     # ------------- Configuracion basica de herramienta -------------
     set_tcp("custom_gripper")
     set_tool_shape("gripper_shape")
+    set_tool("gripper_weight", 0.0, 0.2)
 
     # ------------- Estado inicial hacia el PLC ---------------------
-    plc_set_robot_state(ROBOT_STATE_STANDBY)
-    plc_set_maintenance_state(False)
-    plc_set_pick_vac_ok(False)
-    plc_set_vacuum_loss(False)
-    plc_set_pick_mode("idle")
+    # Mantener el modo mantenimiento entre reinicios del programa.
+    # System_InMaintenance: 1 => en/desde mantenimiento, 0 => normal.
+    _in_maintenance = (System_InMaintenance == 1)
 
-    # ------------- Inicializacion / sincronizacion del lifter ------
+    if _in_maintenance:
+        # No permitir que STANDBY (u otros) sobreescriban MAINTENANCE.
+        plc_enter_maintenance()
+    else:
+        plc_set_robot_state(ROBOT_STATE_STANDBY)
+        plc_set_maintenance_state(False)
+        plc_set_pick_vac_ok(False)
+        plc_set_vacuum_loss(False)
+        plc_set_pick_mode("idle")
+
+# ------------- Inicializacion / sincronizacion del lifter ------
     lifter_safe_init()
 
     if or_lift.isconn():
@@ -2101,12 +2197,46 @@ def main():
     _lifter_level = level_actual
     apply_level_to_frames(level_actual)
 
-    # ------------- Menu inicial: Home / Mantenimiento / Paletizado ---
-    action = ask_initial_action()
+        # ------------- Menu inicial: Home / Mantenimiento / Paletizado ---
+    # Si el programa se reinicia mientras el robot está en MAINTENANCE,
+    # SOLO se permite ejecutar Home seguro. Además, antes de permitir cualquier
+    # movimiento, se verifica que NO haya tarimas presentes en L ni en R.
+    if _in_maintenance:
+        plc_enter_maintenance()
+        tp_log("Reinicio en MAINTENANCE: solo se permite Home seguro.")
+        action = ask_int_required("Robot en MANTENIMIENTO. Unica opcion: 1=Home seguro", 1, 1)
+        wait_no_pallets_present_both_sides()
+    else:
+        action = ask_initial_action()
+
 
     if action == 1:
-        # Home seguro primero (SOLO si el usuario lo pide)
+        # -----------------
+        # HOME SEGURO
+        # Durante el movimiento queremos reflejar estado NORMAL (robot en operación).
+        # Si venimos de MANTENIMIENTO, el lock impide cambiar con plc_set_robot_state,
+        # por eso usamos plc_force_robot_state SOLO durante el home.
+        # -----------------
+        if _in_maintenance:
+            plc_force_robot_state(ROBOT_STATE_NORMAL)
+        else:
+            plc_set_robot_state(ROBOT_STATE_NORMAL)
+
+        plc_vacuum_idle()
         safe_home()
+
+        # Al terminar Home seguro, regresar al estado correcto
+        if _in_maintenance:
+            # IMPORTANTE:
+            # Venimos de mantenimiento. Despues del Home seguro queremos:
+            # 1) Resetear la señal/latch de mantenimiento hacia el PLC
+            # 2) Volver a STANDBY para permitir el menú normal
+            plc_exit_maintenance()
+            plc_set_robot_state(ROBOT_STATE_STANDBY)
+            plc_vacuum_idle()
+        else:
+            plc_set_robot_state(ROBOT_STATE_STANDBY)
+            plc_vacuum_idle()
 
         # Despues de home: elegir entre Mantenimiento o Paletizado
         next_action = ask_home_followup_action()
@@ -2114,6 +2244,8 @@ def main():
             # Mantenimiento
             go_to_maintenance_mode()
             return
+        # Si el robot venia de mantenimiento, liberar el latch antes de paletizar
+        plc_exit_maintenance()
         # Si next_action == 2 -> Paletizado; continua mas abajo SIN safe_home
 
     elif action == 2:
@@ -2136,6 +2268,9 @@ def main():
     layer = ask_layer(side)  # 0-based
     slot  = ask_slot(side, layer)  # 0-based
 
+    # Guardar selección del operador en variables persistentes
+    system_update_progress(side, layer, slot)
+
     plc_set_robot_state(ROBOT_STATE_NORMAL)
 
     tp_log("Inicio en " + side +
@@ -2157,6 +2292,7 @@ def main():
             # Si durante el ciclo se entró a mantenimiento, salir del bucle
             if _in_maintenance:
                 tp_log("Modo mantenimiento activo. Saliendo del bucle de tarimas (single).")
+                stop(DR_QSTOP)
                 return
 
             tp_log("Esperando nueva tarima en lado " + side +
