@@ -84,6 +84,8 @@ _last_place_lost_vacuum = False
 # Se asume un gripper de doble vía, donde cada vía puede controlar media caja.
 do_a = 1  # DO para "mitad A" o una vía del gripper
 do_b = 2  # DO para "mitad B" o la otra vía del gripper
+do_a_blow = 3
+do_b_blow = 4
 
 # Entradas digitales de retro de vacío
 # Estas indican si hay vacío suficiente (pieza agarrada) en cada mitad.
@@ -151,6 +153,11 @@ def rel_full():
     set_digital_output(do_a, OFF)
     set_digital_output(do_b, OFF)
     wait(0.2)
+    set_digital_output(do_a_blow, ON)
+    set_digital_output(do_b_blow, ON)
+    wait(0.5)
+    set_digital_output(do_a_blow, OFF)
+    set_digital_output(do_b_blow, OFF)
 
 def rel_half_a():
     """
@@ -158,6 +165,10 @@ def rel_half_a():
     """
     set_digital_output(do_a, OFF)
     wait(0.15)
+    set_digital_output(do_a_blow, ON)
+    wait(0.5)
+    set_digital_output(do_a_blow, OFF)
+
 
 def rel_half_b():
     """
@@ -165,6 +176,9 @@ def rel_half_b():
     """
     set_digital_output(do_b, OFF)
     wait(0.15)
+    set_digital_output(do_b_blow, ON)
+    wait(0.5)
+    set_digital_output(do_b_blow, OFF)
 
 
 # =====================================================================
@@ -257,6 +271,67 @@ def has_vacuum_for_mode(mode):
     ok_b = (not need_b) or _vac_ok_b()
 
     return ok_a and ok_b
+
+def calc_tool_weight_by_vacuum_feedback(rtype):
+    """Determina qué peso debe setearse usando la retroalimentación de vacío (A/B).
+
+    Reglas:
+      - rtype == "full":
+          * A=1 y B=1  -> full_weight
+          * solo A o solo B -> half_weight
+          * A=0 y B=0  -> gripper_weight
+      - rtype == "half_a":
+          * A=1 -> half_weight
+          * A=0 -> gripper_weight
+      - rtype == "half_b":
+          * B=1 -> half_weight
+          * B=0 -> gripper_weight
+    """
+    a_ok = _vac_ok_a()
+    b_ok = _vac_ok_b()
+
+    if rtype == "full":
+        if a_ok and b_ok:
+            return "full_weight"
+        elif a_ok or b_ok:
+            return "half_weight"
+        else:
+            return "gripper_weight"
+
+    if rtype == "half_a":
+        return "half_weight" if a_ok else "gripper_weight"
+
+    if rtype == "half_b":
+        return "half_weight" if b_ok else "gripper_weight"
+
+    return "gripper_weight"
+
+
+def apply_tool_weight_after_place(rtype, lost_vacuum):
+    """Aplica set_tool() justo DESPUÉS de soltar en el place y ANTES del retract.
+
+    Caso A) NO hubo pérdida de vacío antes del place (lost_vacuum == False):
+      - Se decide por retro (A/B) DESPUÉS del release para cubrir:
+          * Pick FULL -> place half_* (queda media carga)
+          * Pick half_* -> place half_* (queda vacío)
+          * Cualquier variación si el vacío cambió durante approach/bajada
+
+    Caso B) Sí hubo pérdida de vacío antes del place (lost_vacuum == True):
+      - Se determina con retro (A/B) qué quedaba realmente y se setea:
+            full_weight / half_weight / gripper_weight
+    """
+    if lost_vacuum:
+        tool_name = calc_tool_weight_by_vacuum_feedback(rtype)
+        set_tool(tool_name, 0.0, 0.2)
+        return
+
+    # Sin pérdida pre-place: decide el peso por retro A/B tras soltar.
+    # Usamos rtype="full" para evaluar el estado global A/B (full/half/empty).
+    tool_name = calc_tool_weight_by_vacuum_feedback("full")
+    set_tool(tool_name, 0.0, 0.2)
+
+
+
 
 
 # =====================================================================
@@ -1427,6 +1502,8 @@ def do_place(side, layer, slot, rtype):
     else:
         tp_log("WARNING: do_place con tipo desconocido: " + str(rtype))
     
+    apply_tool_weight_after_place(rtype, lost_vacuum)
+    
     plc_set_pick_vac_ok(False)  # tras el place, no hay vacío
 
     movel(rt, v=vl_slow, a=al_slow, ref=rr)
@@ -1774,16 +1851,35 @@ def _is_home():
             abs(jcur[4] - home[4]) <= tol_j_deg and
             abs(jcur[5] - home[5]) <= tol_j_deg)
 
+def _is_safe_pose():
+    """
+    Verifica si la posición actual del robot está dentro de una tolerancia
+    alrededor de la posición 'safe_pose'.
+    """
+    jcur = _get_posj_only()
+    return (abs(jcur[0] - safe_pose[0]) <= tol_j_deg and
+            abs(jcur[1] - safe_pose[1]) <= tol_j_deg and
+            abs(jcur[2] - safe_pose[2]) <= tol_j_deg and
+            abs(jcur[3] - safe_pose[3]) <= tol_j_deg and
+            abs(jcur[4] - safe_pose[4]) <= tol_j_deg and
+            abs(jcur[5] - safe_pose[5]) <= tol_j_deg)
+
+
 def safe_home():
     """
     Lleva al robot de forma segura a la posición 'home':
       - Si ya está en home, no hace nada.
+      -Si esta en safe pose se va a home.
       - Si no:
           1) Sube 100mm en Z en el frame base (movimiento relativo).
           2) Va al hub más cercano (pallets o conveyor) según la Y actual.
           3) Va a 'home'.
     """
     if _is_home():
+        return
+    
+    if _is_safe_pose():
+        movej(home, v=vj_slow, a=aj_slow)
         return
 
     # Obtener pose cartesiana actual
@@ -2183,6 +2279,7 @@ def main():
         plc_set_pick_mode("idle")
 
 # ------------- Inicializacion / sincronizacion del lifter ------
+    safe_home()
     lifter_safe_init()
 
     if or_lift.isconn():
