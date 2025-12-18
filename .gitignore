@@ -1,0 +1,16 @@
+# Dependencias
+node_modules/
+
+# Archivos compilados
+dist/
+build/
+
+# Variables de entorno
+.env
+
+# Logs
+*.log
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
