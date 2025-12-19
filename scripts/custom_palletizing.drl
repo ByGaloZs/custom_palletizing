@@ -1,4 +1,4 @@
-# =====================================================================
+# ==============================    =======================================
 # Palletizing Script (Doosan DRL)
 # Autor: Mario Padilla
 # =====================================================================
@@ -47,12 +47,14 @@ dz_ret = 200.0     # Distancia en Z para retract (RET) después de soltar/tomar 
 # ---------------------- velocidades -----------------
 # Velocidades y aceleraciones de joint (vj/aj) y lineales (vl/al)
 # Se separa en "rápido" y "lento" para poder controlar zonas seguras y zonas de trabajo fino.
-vj_fast = 60;  aj_fast = 50   # Movimiento rápido en juntas (movej)
-vj_slow = 40;  aj_slow = 30   # Movimiento más lento en juntas (para zonas sensibles)
-vl_fast = 1000; al_fast = 500  # Movimiento rápido lineal (movel)
-vl_slow = 500;  al_slow = 250   # Movimiento lento lineal (para acercamiento / contacto)
+vj_fast = 80;   aj_fast = 40
+vj_slow = 40;   aj_slow = 20
+vj_mto =  10;   aj_mto =  5
+vl_fast = 1000; al_fast = 500
+vl_slow = 500;  al_slow = 250
+vl_mto =  100;  al_mto =  50
 
-# ---------------------- poses joint auxiliares ------  
+# ---------------------- poses joint auxiliares ------
 # Home general del robot (posición segura de referencia)
 home = posj(-90.00, 0.00, 90.00, 0.00, 90.00, 90.00)
 
@@ -62,11 +64,9 @@ up_conv  = posj(-91.09, 19.36, 78.55, 0.00, 82.15, 88.91)   # Hub sobre conveyor
 up_left  = posj(4.58, -8.86, 98.00, 0.00, 90.85, 94.58)     # Hub sobre pallet izquierdo
 up_right = posj(-175.42, -8.86, 98.01, 0.00, 90.86, 94.58)  # Hub sobre pallet derecho
 
-
 # Posición segura antes de bajar el lifter por completo y retirar tarima.
 # Esta postura busca minimizar riesgo de colisión cuando se mueve el Lift100.
 safe_pose = posj(0.00, 0.00, 0.00, 0.00, 0.00, 90.00)
-
 
 MAINT_PASSWORD = "1234"   # Contraseña de mantenimiento
 maint_safe_pose = posj(90.00, 50.00, 115.00, 0, -75.00, 90.00)
@@ -78,7 +78,6 @@ _in_maintenance = False
 # y el operador eligió CONTINUAR (no mantenimiento).
 _last_place_lost_vacuum = False
 
-
 # ---------------------- I/O gripper -----------------
 # Definición de las salidas digitales que controlan el gripper
 # Se asume un gripper de doble vía, donde cada vía puede controlar media caja.
@@ -89,8 +88,8 @@ do_b_blow = 4
 
 # Entradas digitales de retro de vacío
 # Estas indican si hay vacío suficiente (pieza agarrada) en cada mitad.
-di_vac_ok_a = 1    # DI para "vacío OK mitad A" 
-di_vac_ok_b = 2    # DI para "vacío OK mitad B" 
+di_vac_ok_a = 1    # DI para "vacío OK mitad A"
+di_vac_ok_b = 2    # DI para "vacío OK mitad B"
 
 # ---------------------- PLC OUTPUT (Robot -> PLC) ----------------------
 # IMPORTANT:
@@ -117,7 +116,6 @@ VAC_LOST_BIT = 1   # %I38.1 -> VACUUM LOST
 
 # Optional status bit (kept from your script)
 MAINT_BIT = 2       # 1 = robot in maintenance mode (aux bit to PLC)
-
 
 # Funciones de control del gripper (FULL / HALF A / HALF B / RELEASE)
 # Estas funciones encapsulan la lógica de encender/apagar las DO y agregar pequeñas esperas.
@@ -169,7 +167,6 @@ def rel_half_a():
     wait(0.5)
     set_digital_output(do_a_blow, OFF)
 
-
 def rel_half_b():
     """
     Libera sólo la mitad B (Half-B).
@@ -180,20 +177,19 @@ def rel_half_b():
     wait(0.5)
     set_digital_output(do_b_blow, OFF)
 
-
 # =====================================================================
 # Retroalimentación de vacío
 # =====================================================================
 # Mientras USE_VAC_FEEDBACK = False, el programa ignora estas DI de vacío
 # y asume que siempre se agarra correctamente la pieza.
-USE_VAC_FEEDBACK = True 
+USE_VAC_FEEDBACK = False
 
 def _vac_ok_a():
     """
     Devuelve True si la mitad A del gripper tiene vacío OK.
 
     Lee directamente de una ENTRADA DIGITAL del robot:
-      di_vac_ok_a -> get_digital_input(di_vac_ok_a)
+        di_vac_ok_a -> get_digital_input(di_vac_ok_a)
     """
     return get_digital_input(di_vac_ok_a) == ON
 
@@ -202,16 +198,16 @@ def _vac_ok_b():
     Devuelve True si la mitad B del gripper tiene vacío OK.
 
     Lee directamente de una ENTRADA DIGITAL del robot:
-      di_vac_ok_b -> get_digital_input(di_vac_ok_b)
+        di_vac_ok_b -> get_digital_input(di_vac_ok_b)
     """
     return get_digital_input(di_vac_ok_b) == ON
 
 def wait_vacuum_ok(mode, timeout=2):
     """
     Espera a que el gripper confirme vacío OK según el modo:
-      - "full"   -> A y B deben tener vacío
-      - "half_a" -> sólo A debe tener vacío
-      - "half_b" -> sólo B debe tener vacío
+        - "full"   -> A y B deben tener vacío
+        - "half_a" -> sólo A debe tener vacío
+        - "half_b" -> sólo B debe tener vacío
 
     Si USE_VAC_FEEDBACK == False, siempre devuelve True (sin sensores).
 
@@ -276,16 +272,16 @@ def calc_tool_weight_by_vacuum_feedback(rtype):
     """Determina qué peso debe setearse usando la retroalimentación de vacío (A/B).
 
     Reglas:
-      - rtype == "full":
-          * A=1 y B=1  -> full_weight
-          * solo A o solo B -> half_weight
-          * A=0 y B=0  -> gripper_weight
-      - rtype == "half_a":
-          * A=1 -> half_weight
-          * A=0 -> gripper_weight
-      - rtype == "half_b":
-          * B=1 -> half_weight
-          * B=0 -> gripper_weight
+        - rtype == "full":
+            * A=1 y B=1  -> full_weight
+            * solo A o solo B -> half_weight
+            * A=0 y B=0  -> gripper_weight
+        - rtype == "half_a":
+            * A=1 -> half_weight
+            * A=0 -> gripper_weight
+        - rtype == "half_b":
+            * B=1 -> half_weight
+            * B=0 -> gripper_weight
     """
     a_ok = _vac_ok_a()
     b_ok = _vac_ok_b()
@@ -306,18 +302,17 @@ def calc_tool_weight_by_vacuum_feedback(rtype):
 
     return "gripper_weight"
 
-
 def apply_tool_weight_after_place(rtype, lost_vacuum):
     """Aplica set_tool() justo DESPUÉS de soltar en el place y ANTES del retract.
 
     Caso A) NO hubo pérdida de vacío antes del place (lost_vacuum == False):
-      - Se decide por retro (A/B) DESPUÉS del release para cubrir:
-          * Pick FULL -> place half_* (queda media carga)
-          * Pick half_* -> place half_* (queda vacío)
-          * Cualquier variación si el vacío cambió durante approach/bajada
+        - Se decide por retro (A/B) DESPUÉS del release para cubrir:
+            * Pick FULL -> place half_* (queda media carga)
+            * Pick half_* -> place half_* (queda vacío)
+            * Cualquier variación si el vacío cambió durante approach/bajada
 
     Caso B) Sí hubo pérdida de vacío antes del place (lost_vacuum == True):
-      - Se determina con retro (A/B) qué quedaba realmente y se setea:
+        - Se determina con retro (A/B) qué quedaba realmente y se setea:
             full_weight / half_weight / gripper_weight
     """
     if lost_vacuum:
@@ -330,10 +325,6 @@ def apply_tool_weight_after_place(rtype, lost_vacuum):
     tool_name = calc_tool_weight_by_vacuum_feedback("full")
     set_tool(tool_name, 0.0, 0.2)
 
-
-
-
-
 # =====================================================================
 # Sensores de seguridad
 # =====================================================================
@@ -345,12 +336,11 @@ CONV_READY_BIT   = 0   # Bit del PLC que indica "conveyor listo"
 PALLET_LEFT_BIT  = 1   # Limit switch pallet izquierdo presente
 PALLET_RIGHT_BIT = 2   # Limit switch pallet derecho presente
 
-
 def _pallet_bit_index(side):
     """
     Devuelve el índice de bit correspondiente al lado:
-      side == "L" -> PALLET_LEFT_BIT
-      side == "R" -> PALLET_RIGHT_BIT
+        side == "L" -> PALLET_LEFT_BIT
+        side == "R" -> PALLET_RIGHT_BIT
     """
     return PALLET_LEFT_BIT if side == "L" else PALLET_RIGHT_BIT
 
@@ -367,8 +357,8 @@ def wait_pallet_present(side):
     Espera a que haya pallet presente en el lado indicado ('L' o 'R').
 
     Se asume:
-      - bit == ON  -> hay tarima presente
-      - bit == OFF -> NO hay tarima
+        - bit == ON  -> hay tarima presente
+        - bit == OFF -> NO hay tarima
     """
     bit_idx = _pallet_bit_index(side)
 
@@ -383,8 +373,8 @@ def wait_remove_finished_pallet(side):
     Espera a que retiren la tarima terminada del lado indicado ('L' o 'R').
 
     Se asume:
-      - bit == ON  -> hay tarima presente
-      - bit == OFF -> tarima retirada
+        - bit == ON  -> hay tarima presente
+        - bit == OFF -> tarima retirada
     """
     bit_idx = _pallet_bit_index(side)
 
@@ -393,7 +383,6 @@ def wait_remove_finished_pallet(side):
         wait(0.5)
 
     tp_log("Tarima retirada en lado " + side + ".")
-
 
 def wait_no_pallets_present_both_sides():
     """
@@ -405,14 +394,14 @@ def wait_no_pallets_present_both_sides():
     estaciones estén libres.
 
     Se asume:
-      - bit == ON  -> hay tarima presente
-      - bit == OFF -> NO hay tarima
+        - bit == ON  -> hay tarima presente
+        - bit == OFF -> NO hay tarima
     """
     while is_pallet_present("L") or is_pallet_present("R"):
         msg = "RETIRE TARIMAS: No se permite movimiento hasta que ambos lados estén libres."
         tp_popup(msg, DR_PM_WARNING)
         tp_log("Bloqueo por tarimas presentes: L=" + str(is_pallet_present("L")) +
-               ", R=" + str(is_pallet_present("R")))
+                ", R=" + str(is_pallet_present("R")))
         wait(0.5)
 
 def wait_conveyor_ready():
@@ -424,8 +413,6 @@ def wait_conveyor_ready():
     while get_input_register_bit(CONV_READY_BIT) == OFF:
         wait(0.2)
     tp_log("Conveyor listo.")
-
-
 
 # =====================================================================
 # LIFTER100 (or_lift) - Lógica multinivel + seguridad + compensación
@@ -446,9 +433,9 @@ DZ_LIFTER_2 = 270.0         # segundo tramo (mm) (total ≈ 670 mm)
 def lifter_level_for_layer(layer):
     """
     Devuelve el nivel lógico del lifter según la cama (layer 0-based):
-      0-3 -> 0
-      4-6 -> 1
-      7-8 -> 2
+        0-3 -> 0
+        4-6 -> 1
+        7-8 -> 2
     """
     if layer <= 3:
         return 0
@@ -473,9 +460,9 @@ def _level_offset(level):
 def lifter_target_pos_for_level(level):
     """
     Posición objetivo en mm del Lift100 para un nivel lógico:
-      level 0 ->   0 mm
-      level 1 -> 400 mm
-      level 2 -> 670 mm
+        level 0 ->   0 mm
+        level 1 -> 400 mm
+        level 2 -> 670 mm
     """
     if level == 0:
         return 0.0
@@ -484,7 +471,6 @@ def lifter_target_pos_for_level(level):
     elif level == 2:
         return 670.0
     return 0.0
-
 
 def lifter_level_from_pos(pos):
     """
@@ -499,21 +485,46 @@ def lifter_level_from_pos(pos):
     else:
         return 2
 
-
 # Estado actual del lifter (nivel lógico 0/1/2)
 _lifter_level = 0
 
-
 # ---------------------- helpers de seguridad Lift100 -----------------
+def lifter_gate_or_stop():
+    # 1) Debe estar conectado
+    if not or_lift.isconn():
+        tp_popup("ERROR LIFTER: No conectado.\nConecte el Lift100 y reinicie.", DR_PM_ALARM)
+        return False
+
+    # 2) Debe estar inicializado (referenciado)
+    if not or_lift.isInit():
+        # Si quieres auto-inicializar, hazlo SOLO desde safe_pose (ver nota abajo)
+        tp_popup("ERROR LIFTER: No inicializado.\nInicialice Lift100 y reinicie.", DR_PM_ALARM)
+        return False
+
+    # 3) No debe tener error activo
+    err = lifter_check_error()
+    if err != 0:
+        tp_popup("ERROR LIFTER: Código " + str(err) + "\nResetee el lifter y reinicie.", DR_PM_ALARM)
+        return False
+
+    # 4) Debe poder leerse posición (detecta fallas de comms)
+    try:
+        or_lift.get_pos()
+    except:
+        tp_popup("ERROR LIFTER: No se puede leer posición.\nRevise comunicación y reinicie.", DR_PM_ALARM)
+        return False
+
+    return True
+
 def lifter_init_is_safe_by_progress():
     """
     Devuelve False si NO es seguro inicializar el lifter (porque init puede bajar a 0).
     Regla solicitada:
-      - Si AMBOS lados tienen progreso (cama) > 5, NO permitir init.
+        - Si AMBOS lados tienen progreso (cama) > 5, NO permitir init.
 
     Nota: tus layers son 0-based.
-      - "mayor a 5" en 1-based = capas 6..9
-      - en 0-based eso es layer >= 5
+        - "mayor a 4" en 1-based = capas 5..9
+        - en 0-based eso es layer >= 4
     """
     # Si por alguna razón no existen aún, por seguridad permitir
     try:
@@ -522,14 +533,13 @@ def lifter_init_is_safe_by_progress():
         if not (l_ok and r_ok):
             return True
 
-        # 0-based: layer >= 5 equivale a cama >= 6 (1-based)
-        if (System_Layer_L >= 5) and (System_Layer_R >= 5):
+        # 0-based: layer >= 4 equivale a cama >= 5 (1-based)
+        if (System_Layer_L >= 4) or (System_Layer_R >= 4):
             return False
 
         return True
     except:
         return True
-
 
 def lifter_wait_ready(timeout=15.0):
     """
@@ -569,7 +579,7 @@ def lifter_check_position(level, tol=5.0):
         return True
 
     tp_log("ADVERTENCIA: Lift100 desincronizado. level=" + str(level) +
-           " pos=" + str(pos) + " esperado=" + str(tgt))
+            " pos=" + str(pos) + " esperado=" + str(tgt))
     return False
 
 def lifter_safe_init():
@@ -588,20 +598,19 @@ def lifter_safe_init():
 
     # --- GUARD: evitar init si puede aplastar tarimas ---
     if not lifter_init_is_safe_by_progress():
-        tp_popup("NO ES SEGURO inicializar el Lift100.", DR_PM_ALARM)
-        tp_log("Bloqueado lifter_safe_init(): progreso alto en ambos lados.")
+        # No es seguro inicializar porque init puede bajar a 0.
+        # El manejo seguro (mover a safe_pose, init, re-subir nivel, home) se hace en main().
+        tp_log("Init Lift100 BLOQUEADO aquí: progreso alto en ambos lados (se maneja con secuencia safe_pose en main).")
         return
 
     tp_log("Inicializando Lift100...")
     or_lift.init()
     lifter_wait_ready()
 
-
     if not or_lift.isInit():
         tp_log("ADVERTENCIA: or_lift.isInit() sigue en False después de init().")
     else:
         tp_log("Lift100 inicializado correctamente.")
-
 
 # ---------------------- frames + nivel lifter ------------------------
 
@@ -609,14 +618,14 @@ def _lifter_do_set_level(level):
     """
     Ajusta el Lift100 al nivel indicado usando or_lift.move().
     Niveles permitidos:
-      0 -> ~0 mm
-      1 -> ~400 mm
-      2 -> ~670 mm
+        0 -> ~0 mm
+        1 -> ~400 mm
+        2 -> ~670 mm
     Incluye:
-      - Verificación de conexión.
-      - Inicialización segura si aún no está init.
-      - Espera a que termine el movimiento (isBusy).
-      - Chequeo de error y de posición final.
+        - Verificación de conexión.
+        - Inicialización segura si aún no está init.
+        - Espera a que termine el movimiento (isBusy).
+        - Chequeo de error y de posición final.
     """
     # Asegurar conexión e init
     lifter_safe_init()
@@ -627,7 +636,7 @@ def _lifter_do_set_level(level):
     # Validar nivel
     if not (level == 0 or level == 1 or level == 2):
         tp_log("Nivel Lift100 inválido: " + str(level) +
-               ". Re-inicializando a posición 0.")
+                ". Re-inicializando a posición 0.")
         or_lift.init()
         lifter_wait_ready()
         lifter_check_error()
@@ -640,11 +649,11 @@ def _lifter_do_set_level(level):
     cur = or_lift.get_pos()
     if abs(cur - tgt) < 2.0 and (not or_lift.isBusy()):
         tp_log("Lift100 ya en nivel " + str(level) +
-               " (pos=" + str(cur) + " mm).")
+                " (pos=" + str(cur) + " mm).")
         return
 
     tp_log("Moviendo Lift100 a nivel " + str(level) +
-           " (" + str(tgt) + " mm).")
+            " (" + str(tgt) + " mm).")
 
     # Movimiento con velocidad razonable dentro del rango 10–100 mm/s
     or_lift.move(tgt, 80.0)
@@ -658,7 +667,6 @@ def _lifter_do_set_level(level):
     # Verificar posición final
     lifter_check_position(level)
 
-
 def apply_level_to_frames(level):
     """
     A partir de los frames ORIGINALES nivel 0 (191, 192, 193),
@@ -666,7 +674,7 @@ def apply_level_to_frames(level):
     según el nivel lógico del lifter (0,1,2).
 
     Regla:
-      new_z = z_original - offset(level)
+        new_z = z_original - offset(level)
     donde offset(level) usa _level_offset(level).
     """
     dz = _level_offset(level)
@@ -696,7 +704,6 @@ def apply_level_to_frames(level):
         # Escribimos en el frame de TRABAJO correspondiente
         overwrite_user_cart_coord(f_work, new_pose, ref_orig, DR_TEMPORARY)
 
-
 def lifter_set_level(side, level):
     """
     Mueve el lifter al nivel indicado (0,1,2) y ajusta SIEMPRE los frames
@@ -704,10 +711,10 @@ def lifter_set_level(side, level):
     (191,192,193), sin modificar jamás los originales.
 
     Pasos:
-      - Si el nivel ya es _lifter_level, no hace nada.
-      - Mueve físicamente el lifter al nivel deseado.
-      - Aplica la compensación de frames con apply_level_to_frames(level).
-      - Actualiza _lifter_level.
+        - Si el nivel ya es _lifter_level, no hace nada.
+        - Mueve físicamente el lifter al nivel deseado.
+        - Aplica la compensación de frames con apply_level_to_frames(level).
+        - Actualiza _lifter_level.
     """
     global _lifter_level
     # Protección: si ya estamos en ese nivel lógico, no hacer nada
@@ -716,7 +723,7 @@ def lifter_set_level(side, level):
         return
 
     tp_log("Cambiando lifter a nivel " + str(level) +
-           " (offset Z = " + str(_level_offset(level)) + " mm).")
+            " (offset Z = " + str(_level_offset(level)) + " mm).")
 
     # Mover físicamente el lifter
     _lifter_do_set_level(level)
@@ -727,14 +734,13 @@ def lifter_set_level(side, level):
     # Actualizar estado lógico
     _lifter_level = level
 
-
 def lifter_restore_frames():
     """
     Restaura el sistema a nivel 0:
-      - Mueve físicamente el lifter a nivel 0.
-      - Aplica apply_level_to_frames(0) para que 101/102/103 coincidan
+        - Mueve físicamente el lifter a nivel 0.
+        - Aplica apply_level_to_frames(0) para que 101/102/103 coincidan
         con los frames originales nivel 0.
-      - Actualiza _lifter_level = 0.
+        - Actualiza _lifter_level = 0.
     """
     global _lifter_level
 
@@ -746,8 +752,6 @@ def lifter_restore_frames():
 
     # Estado lógico
     _lifter_level = 0
-
-
 
 # =====================================================================
 # Datos PLACE (por capas y lados)
@@ -763,7 +767,7 @@ left_layers = [
     # LAYER 1 (Left)
     [
         (105.0, 402.0, 235.0, -180.0, 0.0,  90.0),
-        (588.0,  90.0, 235.0, -180.0, 0.0, -180.0), 
+        (588.0,  90.0, 235.0, -180.0, 0.0, -180.0),
         (588.0, 265.0, 235.0, -180.0, 0.0, -180.0),
         (588.0, 440.0, 235.0, -180.0, 0.0, -180.0),
         (588.0, 615.0, 235.0, -180.0, 0.0, -180.0),
@@ -777,7 +781,7 @@ left_layers = [
         (900.0, 812.0, 365.0, -180.0, 0.0,  90.0),
         (900.0, 407.0, 365.0, -180.0, 0.0,  90.0),
         (418.0,  90.0, 365.0, -180.0, 0.0, -180.0),
-        (418.0, 265.0, 365.0, -180.0, 0.0, -180.0), 
+        (418.0, 265.0, 365.0, -180.0, 0.0, -180.0),
         (418.0, 440.0, 365.0, -180.0, 0.0, -180.0),
         (418.0, 615.0, 365.0, -180.0, 0.0, -180.0),
         (418.0, 790.0, 365.0, -180.0, 0.0, -180.0),
@@ -799,8 +803,8 @@ left_layers = [
     # LAYER 4 (Left)
     [
         (900.0, 812.0, 625.0, -180.0, 0.0,  90.0),
-        (900.0, 407.0, 625.0, -180.0, 0.0,  90.0), 
-        (418.0,  90.0, 625.0, -180.0, 0.0, -180.0), 
+        (900.0, 407.0, 625.0, -180.0, 0.0,  90.0),
+        (418.0,  90.0, 625.0, -180.0, 0.0, -180.0),
         (418.0, 265.0, 625.0, -180.0, 0.0, -180.0),
         (418.0, 440.0, 625.0, -180.0, 0.0, -180.0),
         (418.0, 615.0, 625.0, -180.0, 0.0, -180.0),
@@ -824,11 +828,11 @@ left_layers = [
     [
         (900.0, 812.0, 885.0, -180.0, 0.0,  90.0),
         (900.0, 407.0, 885.0, -180.0, 0.0,  90.0),
-        (418.0,  90.0, 885.0, -180.0, 0.0, -180.0), 
+        (418.0,  90.0, 885.0, -180.0, 0.0, -180.0),
         (418.0, 265.0, 885.0, -180.0, 0.0, -180.0),
-        (418.0, 440.0, 885.0, -180.0, 0.0, -180.0), 
+        (418.0, 440.0, 885.0, -180.0, 0.0, -180.0),
         (418.0, 615.0, 885.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0, 885.0, -180.0, 0.0, -180.0), 
+        (418.0, 790.0, 885.0, -180.0, 0.0, -180.0),
         (418.0, 965.0, 885.0, -180.0, 0.0, -180.0),
         (418.0,1140.0, 885.0, -180.0, 0.0, -180.0)
     ],
@@ -840,7 +844,7 @@ left_layers = [
         (588.0, 440.0, 1015.0, -180.0, 0.0, -180.0),
         (588.0, 615.0, 1015.0, -180.0, 0.0, -180.0),
         (588.0, 790.0, 1015.0, -180.0, 0.0, -180.0),
-        (588.0, 965.0, 1015.0, -180.0, 0.0, -180.0), 
+        (588.0, 965.0, 1015.0, -180.0, 0.0, -180.0),
         (588.0,1140.0, 1015.0, -180.0, 0.0, -180.0),
         (105.0,1197.0, 1015.0, -180.0, 0.0,  90.0)
     ],
@@ -853,7 +857,7 @@ left_layers = [
         (418.0, 440.0, 1145.0, -180.0, 0.0, -180.0),
         (418.0, 615.0, 1145.0, -180.0, 0.0, -180.0),
         (418.0, 790.0, 1145.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0, 1145.0, -180.0, 0.0, -180.0), 
+        (418.0, 965.0, 1145.0, -180.0, 0.0, -180.0),
         (418.0,1140.0, 1145.0, -180.0, 0.0, -180.0)
     ],
     # LAYER 9 (Left)
@@ -864,7 +868,7 @@ left_layers = [
         (588.0, 440.0,1275.0, -180.0, 0.0, -180.0),
         (588.0, 615.0,1275.0, -180.0, 0.0, -180.0),
         (588.0, 790.0,1275.0, -180.0, 0.0, -180.0),
-        (588.0, 965.0,1275.0, -180.0, 0.0, -180.0), 
+        (588.0, 965.0,1275.0, -180.0, 0.0, -180.0),
         (588.0,1140.0,1275.0, -180.0, 0.0, -180.0),
         (105.0,1197.0,1275.0, -180.0, 0.0,  90.0)
     ]
@@ -1060,7 +1064,6 @@ def mk_off(dz):
     """
     return posx(0.0, 0.0, dz, 0.0, 0.0, 0.0, rot_mode)
 
-
 def _approach_offset(side, layer, slot):
     """
     Devuelve el offset (dx, dy) para el APPROACH del PLACE según:
@@ -1108,19 +1111,15 @@ def _approach_offset(side, layer, slot):
     # Si por alguna razón el lado no es L/R:
     return (0.0, 0.0)
 
-
-
 def mk_off_app(side, layer, slot):
     dx, dy = _approach_offset(side, layer, slot)
     return posx(dx, dy, dz_app, 0.0, 0.0, 0.0, rot_mode)
 
-
-
 def get_place(side, layer, slot):
     """
     Devuelve:
-      - La pose posx del PLACE (en el frame del pallet)
-      - El ID de frame (left_frame/right_frame)
+        - La pose posx del PLACE (en el frame del pallet)
+        - El ID de frame (left_frame/right_frame)
     """
     if side == "L":
         p = left_layers[layer][slot]
@@ -1129,11 +1128,9 @@ def get_place(side, layer, slot):
         p = right_layers[layer][slot]
         return posx(p[0], p[1], p[2], p[3], p[4], p[5], rot_mode), right_frame
 
-
 def get_app(side, layer, slot):
     pl, rf = get_place(side, layer, slot)
     return trans(pl, mk_off_app(side, layer, slot), rf, rf), rf
-
 
 def get_ret(side, layer, slot):
     """
@@ -1143,15 +1140,14 @@ def get_ret(side, layer, slot):
     pl, rf = get_place(side, layer, slot)
     return trans(pl, mk_off(dz_ret), rf, rf), rf
 
-
 # --------- selección de Half A/B según tabla ----------
 
 def find_half(side, layer, slot):
     """
     Busca en half_plan_left/right si (layer,slot) es un ORIGEN Half-A.
     Devuelve:
-      (True, dl, ds)  si es origen Half y (dl,ds) es el destino Half-B
-      (False, 0, 0)   si no es origen Half
+        (True, dl, ds)  si es origen Half y (dl,ds) es el destino Half-B
+        (False, 0, 0)   si no es origen Half
     """
     plan = half_plan_left if side == "L" else half_plan_right
     for t in plan:
@@ -1163,8 +1159,8 @@ def is_half_destination(side, layer, slot):
     """
     Indica si (layer,slot) es un DESTINO Half-B.
     Se usa para:
-      - Saltar esos slots en la corrida normal (run_from).
-      - Reconocer cuando el usuario arranca justo en un Half-B.
+        - Saltar esos slots en la corrida normal (run_from).
+        - Reconocer cuando el usuario arranca justo en un Half-B.
     """
     plan = half_plan_left if side == "L" else half_plan_right
     for t in plan:
@@ -1185,9 +1181,9 @@ def _is_group_b(side, layer, slot):
 def get_mid(side, layer, slot):
     """
     Devuelve el joint target Mid adecuado (A o B) según:
-      - Lado (Left/Right)
-      - Capa (layer)
-      - Slot
+        - Lado (Left/Right)
+        - Capa (layer)
+        - Slot
     Si la capa excede el tamaño de la lista de mids, devuelve None.
     """
     use_b = _is_group_b(side, layer, slot)
@@ -1209,7 +1205,6 @@ def get_mid(side, layer, slot):
 # Pose cartesiana del pick en el conveyor (en conv_frame)
 pick_pose = posx(243.491, -194.909, 845.643, 180.00, 0.00, 0.0, rot_mode)
 
-
 def get_pick():
     """
     Devuelve la pose de pick y el frame del conveyor.
@@ -1228,12 +1223,11 @@ def get_pick_ret():
     """
     return trans(pick_pose, mk_off(dz_ret), conv_frame, conv_frame), conv_frame
 
-
 def plc_set_robot_state(state_int):
     """Publica el estado del robot al PLC (Robot -> PLC INT %ID344).
 
     NOTA:
-      - El modo MANTENIMIENTO tiene prioridad. Una vez que _in_maintenance es True,
+        - El modo MANTENIMIENTO tiene prioridad. Una vez que _in_maintenance es True,
         NO se permite que otros estados (StandBy/Normal/Manual/Idle) lo sobreescriban.
     """
     global _in_maintenance
@@ -1267,16 +1261,14 @@ def plc_vacuum_lost():
     set_output_register_bit(VAC_OK_BIT, 0)
     set_output_register_bit(VAC_LOST_BIT, 1)
 
-
-
 def plc_enter_maintenance():
     """Force PLC outputs to MAINTENANCE and clear other transient states.
 
     Call this anytime maintenance is requested, so:
-      - Robot state stays in MAINTENANCE.
-      - Vacuum bits are cleared (no stale VAC_LOST / VAC_OK).
-      - Pick mode is set to idle.
-      - Maintenance flag bit is asserted.
+        - Robot state stays in MAINTENANCE.
+        - Vacuum bits are cleared (no stale VAC_LOST / VAC_OK).
+        - Pick mode is set to idle.
+        - Maintenance flag bit is asserted.
     """
     global _in_maintenance, System_InMaintenance
     _in_maintenance = True
@@ -1285,7 +1277,6 @@ def plc_enter_maintenance():
     plc_set_maintenance_state(True)
     plc_vacuum_idle()
     plc_set_pick_mode("idle")
-
 
 def plc_exit_maintenance():
     """Clear maintenance latch (allows other states again)."""
@@ -1299,9 +1290,9 @@ def plc_set_pick_mode(mode):
     """Envía al PLC el modo de pick como un entero.
 
     Mapeo propuesto:
-      0 = idle
-      1 = full
-      2 = half_b
+        0 = idle
+        1 = full
+        2 = half_b
 
     half_a NO se usa en el proceso actual.
     """
@@ -1328,8 +1319,6 @@ def plc_set_pick_vac_ok(ok_flag):
         tp_log("PLC vacuum_state = IDLE")
         plc_vacuum_idle()
 
-
-
 def plc_set_vacuum_loss(flag):
     """Backward-compatible helper.
     True  -> VACUUM LOST bit ON, VACUUM OK bit OFF
@@ -1342,25 +1331,22 @@ def plc_set_vacuum_loss(flag):
         tp_log("PLC vacuum_state = IDLE")
         plc_vacuum_idle()
 
-
 def plc_set_maintenance_state(is_on):
     """Publish maintenance flag bit to the PLC (aux bit)."""
     bit_val = 1 if is_on else 0
     tp_log("PLC maint_state_bit = " + str(bit_val))
     set_output_register_bit(MAINT_BIT, bit_val)
 
-
-
 def do_pick(mode):
     """
     Secuencia completa de pick con reintentos por fallo de vacío:
 
-      - Hace hasta 2 intentos automáticos.
-      - Si falla esos 2 intentos:
-          * Pregunta UNA SOLA VEZ si quiere reintentar.
-          * Si el usuario elige reintentar:
+        - Hace hasta 2 intentos automáticos.
+        - Si falla esos 2 intentos:
+            * Pregunta UNA SOLA VEZ si quiere reintentar.
+            * Si el usuario elige reintentar:
                 - Se permiten otros 2 intentos.
-          * Si vuelve a fallar estos 2 intentos, o el usuario elige no reintentar:
+            * Si vuelve a fallar estos 2 intentos, o el usuario elige no reintentar:
                 - Se llama a modo mantenimiento (contraseña, sin pallets, etc.).
 
     Devuelve True si hubo vacío OK, False si se entra a modo mantenimiento.
@@ -1377,7 +1363,6 @@ def do_pick(mode):
     while True:
         attempts = attempts + 1
 
-
         # 2) Ir al hub sobre el conveyor
         movej(up_conv, vj_fast, aj_fast)
 
@@ -1388,7 +1373,7 @@ def do_pick(mode):
 
         # 4) Bajar a APPROACH y luego a PICK
         movej(a, v=vj_slow, a=aj_slow, ref=conv_frame)
-         # 1) Esperar conveyor listo
+            # 1) Esperar conveyor listo
         wait_conveyor_ready()
         set_tool("gripper_weight", 0.0, 0.2)
         movel(p, v=vl_slow, a=al_slow, ref=conv_frame)
@@ -1419,12 +1404,12 @@ def do_pick(mode):
             plc_set_pick_vac_ok(True)
             if attempts > 1:
                 tp_log("Pick recuperado en intento " + str(attempts) +
-                       " (modo=" + mode + ").")
+                        " (modo=" + mode + ").")
             return True
 
         # 7) FALLO DE VACÍO en este intento
         tp_log("Fallo de vacio en intento " + str(attempts) +
-               " (modo=" + mode + ").")
+                " (modo=" + mode + ").")
 
         # Publish VACUUM LOST to the PLC (mutually exclusive with VACUUM OK)
         plc_set_vacuum_loss(True)
@@ -1445,8 +1430,7 @@ def do_pick(mode):
                 return False
 
             # Primera vez que fallan los max_attempts
-            resp = ask_int_required("1=Reintentar, 2= Mantenimiento", 1, 2)
-
+            resp = ask_int_required("1 -->Reintentar \n2 -->Mantenimiento", 1, 2)
 
             if resp == 1:
                 tp_log("Operador eligio reintentar pick una vez mas.")
@@ -1462,10 +1446,7 @@ def do_pick(mode):
         # Si aún no se llegaron a los max_attempts de esta ronda,
         # el while continua y se hace otro intento automáticamente.
         tp_log("Reintentando pick (intento " +
-               str(attempts + 1) + " de " + str(max_attempts) + ").")
-
-
-
+                str(attempts + 1) + " de " + str(max_attempts) + ").")
 
 # =====================================================================
 # Place (full / half)
@@ -1474,24 +1455,24 @@ def do_pick(mode):
 def do_place(side, layer, slot, rtype):
     """
     Secuencia completa de place en un slot:
-      - Mueve al hub del lado (up_left/up_right)
-      - Pasa por MidA o MidB (si está definido para esa capa/slot)
-      - Va al APPROACH (con offsets X/Y/Z)
-      - Baja al PLACE
-      - Suelta tipo rtype (full/half_a/half_b)
-      - Sube a RETRACT
-      - Regresa al hub del lado
+        - Mueve al hub del lado (up_left/up_right)
+        - Pasa por MidA o MidB (si está definido para esa capa/slot)
+        - Va al APPROACH (con offsets X/Y/Z)
+        - Baja al PLACE
+        - Suelta tipo rtype (full/half_a/half_b)
+        - Sube a RETRACT
+        - Regresa al hub del lado
 
     Comportamiento especial ante pérdida de vacío ANTES del place:
-      - Se detecta antes de bajar al pallet.
-      - Aun así se hace todo el movimiento de place.
-      - Ya en el hub se notifica al operador y se pregunta:
-          1 = Continuar (se considera un place "bueno" y se sigue al siguiente pick)
-          2 = Mantenimiento (se llama go_to_maintenance_mode)
+        - Se detecta antes de bajar al pallet.
+        - Aun así se hace todo el movimiento de place.
+        - Ya en el hub se notifica al operador y se pregunta:
+            1 = Continuar (se considera un place "bueno" y se sigue al siguiente pick)
+            2 = Mantenimiento (se llama go_to_maintenance_mode)
 
     Devuelve:
-      True  -> place terminado y se puede continuar (siguiente acción será un pick)
-      False -> se llamó a mantenimiento y NO se debe seguir.
+        True  -> place terminado y se puede continuar (siguiente acción será un pick)
+        False -> se llamó a mantenimiento y NO se debe seguir.
     """
     global _last_place_lost_vacuum
     _last_place_lost_vacuum = False  # por defecto, sin problema
@@ -1512,9 +1493,9 @@ def do_place(side, layer, slot, rtype):
     if not has_vacuum_for_mode(rtype):
         lost_vacuum = True
         tp_log("Perdida de vacio detectada ANTES de place. side=" +
-               side + " layer=" + str(layer + 1) +
-               " slot=" + str(slot + 1) +
-               " tipo=" + str(rtype))
+                side + " layer=" + str(layer + 1) +
+                " slot=" + str(slot + 1) +
+                " tipo=" + str(rtype))
 
     # 3) Movimiento normal de place (siempre se hace)
     use_b = _is_group_b(side, layer, slot)
@@ -1538,9 +1519,9 @@ def do_place(side, layer, slot, rtype):
         rel_half_b()
     else:
         tp_log("WARNING: do_place con tipo desconocido: " + str(rtype))
-    
+
     apply_tool_weight_after_place(rtype, lost_vacuum)
-    
+
     plc_set_pick_vac_ok(False)  # tras el place, no hay vacío
 
     movel(rt, v=vl_slow, a=al_slow, ref=rr)
@@ -1556,11 +1537,11 @@ def do_place(side, layer, slot, rtype):
     #    ya estamos en el hub; ahora se le pregunta al operador qué hacer.
     plc_set_vacuum_loss(1)
 
-    resp = ask_int_required("1=Continuar paletizado (se considera good place), 2=Llamar mantenimiento", 1, 2)
+    resp = ask_int_required("1=Continuar paletizado \n2=Llamar mantenimiento", 1, 2)
 
     if resp == 1:
         tp_log("Operador eligio CONTINUAR tras perdida de vacio en place. "
-               "Se considerara este place como COMPLETADO.")
+                "Se considerara este place como COMPLETADO.")
         plc_set_vacuum_loss(0)
 
         # Muy importante:
@@ -1574,7 +1555,6 @@ def do_place(side, layer, slot, rtype):
         plc_set_pick_vac_ok(False)
         return False
 
-
 # =====================================================================
 # Lógica Half-A / Half-B
 # =====================================================================
@@ -1587,15 +1567,15 @@ def do_half(side, layer, slot, is_half, dl, ds):
     Maneja la lógica de Half-A / Half-B para un slot.
 
     Si is_half == True:
-      - Coloca una mitad en el slot origen
-      - Coloca la otra mitad en el destino (dl, ds), si procede.
+        - Coloca una mitad en el slot origen
+        - Coloca la otra mitad en el destino (dl, ds), si procede.
 
     IMPORTANTE (por espejo físico):
-      Lado izquierdo  (side == "L"):
+        Lado izquierdo  (side == "L"):
         - Origen  -> Half-A
         - Destino -> Half-B
 
-      Lado derecho   (side == "R"):
+        Lado derecho   (side == "R"):
         - Origen  -> Half-B
         - Destino -> Half-A
 
@@ -1615,10 +1595,10 @@ def do_half(side, layer, slot, is_half, dl, ds):
             dest_rtype   = "half_a"
 
         tp_log("Half: side=" + side +
-               " ORIG L" + str(layer+1) + " S" + str(slot+1) +
-               " (" + origin_rtype + ")" +
-               " -> DEST L" + str(dl+1) + " S" + str(ds+1) +
-               " (" + dest_rtype + ")")
+                " ORIG L" + str(layer+1) + " S" + str(slot+1) +
+                " (" + origin_rtype + ")" +
+                " -> DEST L" + str(dl+1) + " S" + str(ds+1) +
+                " (" + dest_rtype + ")")
 
         # 1) Colocar mitad en el ORIGEN
         ok_origin = do_place(side, layer, slot, origin_rtype)
@@ -1630,13 +1610,13 @@ def do_half(side, layer, slot, is_half, dl, ds):
         # NO intentamos la segunda mitad.
         if _last_place_lost_vacuum:
             tp_log("do_half: perdida de vacio en origen, operador continuo. "
-                   "Se omite destino y se continua con siguiente slot.")
+                    "Se omite destino y se continua con siguiente slot.")
             return True
 
         # 2) Verificar si el DESTINO ya fue llenado antes
         if (side, dl, ds) in _halfB_filled:
             tp_log("Destino Half ya estaba lleno. Omitiendo: side=" + side +
-                   " L" + str(dl+1) + " S" + str(ds+1))
+                    " L" + str(dl+1) + " S" + str(ds+1))
             return True
 
         # 3) Comprobar que el destino es válido en la tabla
@@ -1654,11 +1634,11 @@ def do_half(side, layer, slot, is_half, dl, ds):
         lifter_set_level(side, dest_level)
 
         movej((up_right if side == "R" else up_left),
-              v=vj_slow, a=aj_slow)
+                v=vj_slow, a=aj_slow)
 
         tp_log("Colocando mitad destino en side=" + side +
-               " L" + str(dl+1) + " S" + str(ds+1) +
-               " (" + dest_rtype + ")")
+                " L" + str(dl+1) + " S" + str(ds+1) +
+                " (" + dest_rtype + ")")
 
         ok_dest_place = do_place(side, dl, ds, dest_rtype)
         if not ok_dest_place:
@@ -1677,7 +1657,6 @@ def do_half(side, layer, slot, is_half, dl, ds):
             return False
 
         return True
-
 
 # =====================================================================
 # tp helpers (Teach Pendant)
@@ -1721,8 +1700,6 @@ def ask_str_required(prompt):
         tp_popup("Entrada vacia. Por favor ingrese un texto.", DR_PM_WARNING)
         tp_log("ask_str_required: string vacio. Reintentando...")
 
-
-
 # ===================== SYSTEM PERSISTENT VARIABLES =====================
 # Variables persistentes en el controlador (prefijo System_)
 # Guardan el progreso por lado (independiente L/R).
@@ -1750,6 +1727,19 @@ def system_update_progress(side, layer, slot):
 
         tp_log("System progress -> side=" + str(side) + " layer=" + str(layer) + " slot=" + str(slot))
 
+def system_reset_progress(side):
+    """Resetea el progreso persistente del lado indicado a inicio (L1 S1 -> 0-based 0,0)."""
+    global System_Side, System_Layer_L, System_Slot_L, System_Layer_R, System_Slot_R
+
+    System_Side = side
+    if side == "L":
+        System_Layer_L = 0
+        System_Slot_L  = 0
+    else:
+        System_Layer_R = 0
+        System_Slot_R  = 0
+
+    tp_log("System reset -> side=" + str(side) + " layer=0 slot=0")
 
 def warn_if_starting_before_last(side, layer, slot):
     """
@@ -1777,12 +1767,11 @@ def warn_if_starting_before_last(side, layer, slot):
         return True
 
     # Advertencia fuerte + confirmación
-    msg = ("ADVERTENCIA: El inicio seleccionado es ANTERIOR al último progreso guardado")
+    msg = ("La Cama y Slot seleccionados son menores a los usados anteriormente.")
     tp_popup(msg, DR_PM_WARNING)
 
-    resp = ask_int_required("1=Continuar, 2=Reingresar", 1, 2)
+    resp = ask_int_required("1 -->Continuar \n2 -->Reingresar", 1, 2)
     return (resp == 1)
-
 
 def ask_layer(side):
     """
@@ -1790,7 +1779,7 @@ def ask_layer(side):
     El usuario responde 1..N y se convierte a índice 0-based.
     """
     n = len(left_layers) if side == "L" else len(right_layers)
-    v = ask_int_required("Seleccione en que Cama quiere iniciar 1 - " + str(n), 1, n)
+    v = ask_int_required("Seleccione la Cama 1 - " + str(n), 1, n)
     return v - 1  # 0-based
 
 def ask_slot(side, layer):
@@ -1799,20 +1788,19 @@ def ask_slot(side, layer):
     El usuario responde 1..N y se convierte a índice 0-based.
     """
     n = len(left_layers[layer]) if side == "L" else len(right_layers[layer])
-    v = ask_int_required("Seleccione en que Slot quiere iniciar 1 - " + str(n), 1, n)
+    v = ask_int_required("Seleccione el Slot 1 - " + str(n), 1, n)
     return v - 1  # 0-based
-
 
 def get_configured_start_side():
     """
     Devuelve el lado inicial configurado por variable de sistema.
 
     Reglas:
-      - El sistema SIEMPRE paletiza en ambos lados.
-      - El lado inicial NO lo elige el operador; se define con System_StartSide.
+        - El sistema SIEMPRE paletiza en ambos lados.
+        - El lado inicial NO lo elige el operador; se define con System_StartSide.
 
     Se espera:
-      System_StartSide = "L" o "R"
+        System_StartSide = "L" o "R"
 
     Si la variable no existe, es invalida, o viene vacia, se asume "R".
     """
@@ -1834,19 +1822,17 @@ def get_configured_start_side():
         return "L"
     return "R"
 
-
 def ask_main_operation():
     """
     Popup inicial del programa (nuevo flujo):
 
-      1 -> Paletizar
-      2 -> Enviar a mantenimiento
+        1 -> Paletizar
+        2 -> Enviar a mantenimiento
 
     Devuelve 1 o 2.
     """
-    msg = "Seleccione operacion: 1=Paletizar, 2=Mantenimiento"
+    msg = "Ingrese un numero:" "\n 1 -->Paletizar  2 -->Mantenimiento"
     return ask_int_required(msg, 1, 2)
-
 
 # =====================================================================
 # helpers para lecturas posx/posj y safe_home
@@ -1935,20 +1921,19 @@ def _is_safe_pose():
             abs(jcur[4] - safe_pose[4]) <= tol_j_deg and
             abs(jcur[5] - safe_pose[5]) <= tol_j_deg)
 
-
 def safe_home():
     """
     Lleva al robot de forma segura a la posición 'home':
-      - Si ya está en home, no hace nada.
-      -Si esta en safe pose se va a home.
-      - Si no:
-          1) Sube 100mm en Z en el frame base (movimiento relativo).
-          2) Va al hub más cercano (pallets o conveyor) según la Y actual.
-          3) Va a 'home'.
+        - Si ya está en home, no hace nada.
+        -Si esta en safe pose se va a home.
+        - Si no:
+            1) Sube 100mm en Z en el frame base (movimiento relativo).
+            2) Va al hub más cercano (pallets o conveyor) según la Y actual.
+            3) Va a 'home'.
     """
     if _is_home():
         return
-    
+
     if _is_safe_pose():
         movej(home, v=vj_slow, a=aj_slow)
         return
@@ -1966,7 +1951,6 @@ def safe_home():
     hub = _nearest_hub_by_x(cx)
     movej(hub, v=vj_slow, a=aj_slow)
 
-
     # Finalmente ir a home
     movej(home, v=vj_slow, a=aj_slow)
 
@@ -1975,18 +1959,18 @@ def go_safe_before_lifter():
     Movimiento a una pose segura antes de operar el lifter.
     Se usa para minimizar riesgos de colisión cuando se cambian niveles.
     """
-    movej(safe_pose, v=vj_slow, a=aj_slow)
+    movej(safe_pose, v=vj_mto, a=aj_mto)
 
 def go_to_maintenance_mode():
     """
     Rutina de llamada a mantenimiento:
-      - Pide contraseña de mantenimiento (se repite hasta que sea correcta).
-      - Verifica que no haya pallets presentes (L/R).
+        - Pide contraseña de mantenimiento (se repite hasta que sea correcta).
+        - Verifica que no haya pallets presentes (L/R).
         * Si hay, pide retirar y espera a que los bits se apaguen.
-      - Lleva al robot a una pose segura para mover el lifter.
-      - Baja el lifter y restaura frames (nivel 0).
-      - Lleva al robot a la pose de mantenimiento.
-      - Detiene el programa.
+        - Lleva al robot a una pose segura para mover el lifter.
+        - Baja el lifter y restaura frames (nivel 0).
+        - Lleva al robot a la pose de mantenimiento.
+        - Detiene el programa.
     """
     global _in_maintenance
     set_tool("gripper_weight", 0.0, 0.2)
@@ -2023,21 +2007,20 @@ def go_to_maintenance_mode():
     # 4) Bajar lifter y restaurar frames (nivel 0)
     lifter_restore_frames()
     # 5) Llevar al robot a la pose de mantenimiento
-    movej(maint_safe_pose, v=vj_slow, a=aj_slow)
+    movej(maint_safe_pose, v=vj_mto, a=aj_mto)
 
     tp_log("Robot en pose de mantenimiento. Programa detenido.")
     stop(DR_QSTOP)
-
 
 # =====================================================================
 def finish_side(side):
     """
     Secuencia estándar de finalización de un lado:
-      - Log de fin de lado.
-      - Ir a posición segura antes de mover el lifter.
-      - Pedir que retiren la tarima.
-      - Esperar a que la tarima sea retirada.
-      - Restaurar frames y nivel lógico del lifter a 0.
+        - Log de fin de lado.
+        - Ir a posición segura antes de mover el lifter.
+        - Pedir que retiren la tarima.
+        - Esperar a que la tarima sea retirada.
+        - Restaurar frames y nivel lógico del lifter a 0.
     """
     global _in_maintenance
     if _in_maintenance:
@@ -2047,12 +2030,31 @@ def finish_side(side):
     go_safe_before_lifter()
 
     plc_set_robot_state(ROBOT_STATE_MANUAL)
-    tp_popup("Retire la tarima terminada del lado " + side + ".", DR_PM_MESSAGE)
+    tp_popup("Retire la tarima terminada.", DR_PM_MESSAGE)
     wait_remove_finished_pallet(side)
 
     lifter_restore_frames()
     # After manual pallet removal, we are back to standby (waiting / next decisions)
     plc_set_robot_state(ROBOT_STATE_STANDBY)
+
+# =====================================================================
+# PROGRESO: reset de variables de sistema por lado (solo cuando un lado termina)
+# =====================================================================
+def reset_side_progress(side):
+    """Resetear SOLO el progreso persistente del lado indicado a (0,0) 0-based."""
+    global System_Layer_L, System_Slot_L, System_Layer_R, System_Slot_R
+
+    if side == "L":
+        System_Layer_L = 0
+        System_Slot_L  = 0
+    else:
+        System_Layer_R = 0
+        System_Slot_R  = 0
+
+def complete_side(side):
+    """Finalizar lado + reset de progreso persistente de ese lado."""
+    finish_side(side)
+    reset_side_progress(side)
 
 # =====================================================================
 # rutina: ejecutar desde (layer,slot) hasta acabar el lado
@@ -2064,10 +2066,10 @@ def run_from(side, start_layer, start_slot):
     hasta completar todas las capas y slots del lado indicado.
 
     Maneja:
-      - Ajuste de nivel del lifter por cada cama.
-      - Slots destino Half-B que deben saltarse (ya llenados).
-      - Caso especial: última caja de la cama 9 (solo Half-B).
-      - Lógica general FULL / Half-A → Half-B.
+        - Ajuste de nivel del lifter por cada cama.
+        - Slots destino Half-B que deben saltarse (ya llenados).
+        - Caso especial: última caja de la cama 9 (solo Half-B).
+        - Lógica general FULL / Half-A → Half-B.
     """
     # Seleccionar la tabla de layers según el lado
     layers = left_layers if side == "L" else right_layers
@@ -2075,8 +2077,8 @@ def run_from(side, start_layer, start_slot):
     layer = start_layer
 
     tp_log("run_from: lado " + side +
-           " inicio en L" + str(start_layer+1) +
-           " S" + str(start_slot+1))
+            " inicio en L" + str(start_layer+1) +
+            " S" + str(start_slot+1))
 
     # Actualizar progreso persistente al inicio del ciclo
     system_update_progress(side, start_layer, start_slot)
@@ -2099,7 +2101,7 @@ def run_from(side, start_layer, start_slot):
             # Saltar slots que son destino Half-B (ya fueron llenados por do_half)
             if is_half_destination(side, layer, slot):
                 tp_log("run_from: saltando destino Half-B L" +
-                       str(layer+1) + " S" + str(slot+1))
+                        str(layer+1) + " S" + str(slot+1))
                 slot = slot + 1
                 continue
 
@@ -2109,14 +2111,14 @@ def run_from(side, start_layer, start_slot):
             # ---- CASO ESPECIAL: última caja de la cama 9 (solo Half-B) ----
             if (layer == n_layers - 1) and (slot == n_slots - 1):
                 tp_log("Última caja de la cama 9: sólo Half-B en " +
-                       side + " L" + str(layer+1) +
-                       " S" + str(slot+1))
+                        side + " L" + str(layer+1) +
+                        " S" + str(slot+1))
 
                 # Aquí se toma directamente Half-B del conveyor
                 ok_pick = do_pick("half_b")
                 if not ok_pick:
                     tp_log("Abortando lado " + side +
-                           " por fallo de vacío en la última caja.")
+                            " por fallo de vacío en la última caja.")
                     return
 
                 # Se coloca como Half-B en el último slot
@@ -2126,22 +2128,22 @@ def run_from(side, start_layer, start_slot):
                     return
 
                 tp_log("Última caja completada en " + side +
-                       " L" + str(layer+1) +
-                       " S" + str(slot+1) +
-                       ". Fin de run_from para este lado.")
+                        " L" + str(layer+1) +
+                        " S" + str(slot+1) +
+                        ". Fin de run_from para este lado.")
                 return
 
             # ---- CASO GENERAL: cajas FULL / Half-A → Half-B ----
             tp_log("run_from: Colocando en " + side +
-                   " L" + str(layer+1) +
-                   " S" + str(slot+1))
+                    " L" + str(layer+1) +
+                    " S" + str(slot+1))
 
             # Tomar caja completa del conveyor
             ok_pick = do_pick("full")
             if not ok_pick:
                 tp_log("Abortando lado " + side +
-                       " por fallo de vacío en L" +
-                       str(layer+1) + " S" + str(slot+1))
+                        " por fallo de vacío en L" +
+                        str(layer+1) + " S" + str(slot+1))
                 return  # salir de run_from, no ir a place
 
             # Determinar si este slot es Half (origen) y su destino
@@ -2151,7 +2153,7 @@ def run_from(side, start_layer, start_slot):
             ok_place = do_half(side, layer, slot, is_h, dl, ds)
             if not ok_place:
                 tp_log("run_from: se salio por mantenimiento en " +
-                       side + " L" + str(layer+1) + " S" + str(slot+1))
+                        side + " L" + str(layer+1) + " S" + str(slot+1))
                 return
 
             # Avanzar al siguiente slot
@@ -2162,20 +2164,19 @@ def run_from(side, start_layer, start_slot):
 
     tp_log("run_from: lado " + side + " completado.")
 
-
 # =====================================================================
 def run_side_once(side, layer, slot):
     """
     Ejecuta un ciclo completo de paletizado SOLO para el lado 'side',
     comenzando en (layer, slot), respetando:
-      - Caso especial: arranque exactamente en última caja (cama 9, slot 9).
-      - Caso especial: arranque en destino Half-B.
-      - Caso normal: FULL / Half-A → Half-B.
+        - Caso especial: arranque exactamente en última caja (cama 9, slot 9).
+        - Caso especial: arranque en destino Half-B.
+        - Caso normal: FULL / Half-A → Half-B.
 
     Al terminar:
-      - Deja el robot en posición segura de retirada (finish_side).
-      - Espera a que retiren la tarima.
-      - Restaura frames y lifter (nivel 0).
+        - Deja el robot en posición segura de retirada (finish_side).
+        - Espera a que retiren la tarima.
+        - Restaura frames y lifter (nivel 0).
 
     NO toca el otro lado ni regresa a HOME.
     """
@@ -2206,7 +2207,7 @@ def run_side_once(side, layer, slot):
         ok_pick = do_pick("half_b")
         if not ok_pick:
             tp_log("Abortando lado " + side +
-                   " por fallo de vacío en la última caja (arranque especial).")
+                    " por fallo de vacío en la última caja (arranque especial).")
             finish_side(side)
             return False
 
@@ -2218,7 +2219,7 @@ def run_side_once(side, layer, slot):
             return False
 
         # Finalizar lado (posición segura + retirar tarima + restaurar frames/lifter)
-        finish_side(side)
+        complete_side(side)
         return True
 
     # ---------- CASO ESPECIAL 2: slot inicial es destino Half-B ----------
@@ -2235,10 +2236,10 @@ def run_side_once(side, layer, slot):
         ok_pick = do_pick("half_b")
         if not ok_pick:
             tp_log("Abortando lado " + side +
-                   " por fallo de vacío al arrancar en Half-B.")
+                    " por fallo de vacío al arrancar en Half-B.")
             finish_side(side)
             return False
-            
+
         # Colocar Half-B en este slot
         ok2 = do_place(side, layer, slot, "half_b")
         if not ok2:
@@ -2248,7 +2249,6 @@ def run_side_once(side, layer, slot):
 
         # Registrar este destino Half-B como lleno
         _halfB_filled.add((side, layer, slot))
-
 
         # Calcular el siguiente slot donde continuar
         next_layer = layer
@@ -2269,7 +2269,7 @@ def run_side_once(side, layer, slot):
             return False
 
         # Al final, terminar el lado
-        finish_side(side)
+        complete_side(side)
         return True
 
     # ----------------- CASO NORMAL: slot inicial NO es destino Half-B -----------------
@@ -2283,8 +2283,8 @@ def run_side_once(side, layer, slot):
     ok_pick = do_pick("full")
     if not ok_pick:
         tp_log("Abortando lado " + side +
-               " por fallo de vacío en el slot inicial L" +
-               str(layer+1) + " S" + str(slot+1))
+                " por fallo de vacío en el slot inicial L" +
+                str(layer+1) + " S" + str(slot+1))
         finish_side(side)
         return False
 
@@ -2307,9 +2307,8 @@ def run_side_once(side, layer, slot):
         return False
 
     # Finalizar lado
-    finish_side(side)
+    complete_side(side)
     return True
-
 
 # =====================================================================
 # MAIN
@@ -2321,6 +2320,7 @@ def main():
     set_tcp("custom_gripper")
     set_tool_shape("gripper_shape")
     set_tool("gripper_weight", 0.0, 0.2)
+    rel_full()
 
     # ----------------- Estado inicial hacia PLC ------------------
     # System_InMaintenance: 1 => viene de mantenimiento, 0 => normal
@@ -2344,7 +2344,7 @@ def main():
         wait_no_pallets_present_both_sides()
 
         if not _is_safe_pose():
-            movej(safe_pose, v=vj_slow, a=aj_slow)
+            movej(safe_pose, v=vj_mto, a=aj_mto)
 
         movej(home, v=vj_slow, a=aj_slow)
 
@@ -2353,88 +2353,177 @@ def main():
         System_InMaintenance = 0
         _in_maintenance = False
 
+        # (Opcional) Si tu proceso requiere quedar siempre en home seguro:
+        # safe_home()
+
     else:
         # Arranque normal: usar Home Seguro
         safe_home()
 
-    # ----------------- Lifter init + sincronizacion frames --------
-    lifter_safe_init()
+        # ----------------- Lifter init + sincronizacion frames --------
+        # Caso especial: si NO es seguro inicializar (por progreso alto en ambos lados),
+        # secuencia segura:
+        #   1) safe_pose
+        #   2) init lifter (baja a 0)
+        #   3) re-subir lifter al nivel que corresponde según progreso
+        #   4) home
+        if or_lift.isconn() and (not or_lift.isInit()) and (not lifter_init_is_safe_by_progress()):
+            tp_log("Init Lift100 NO seguro por progreso alto. Secuencia: safe_pose -> init -> re-subir nivel -> home.")
 
-    if or_lift.isconn():
-        pos = or_lift.get_pos()
-        level_actual = lifter_level_from_pos(pos)
-        tp_log("Lift100 detectado en pos=" + str(pos) +
-               " mm, nivel logico estimado=" + str(level_actual))
-    else:
-        tp_log("Lift100 no conectado al inicio: se asume nivel 0.")
-        level_actual = 0
+            # 1) Ir a safe_pose antes de inicializar
+            if not _is_safe_pose():
+                movej(safe_pose, v=vj_mto, a=aj_mto)
 
-    _lifter_level = level_actual
-    apply_level_to_frames(level_actual)
+            # 2) Inicializar (referenciar) lifter
+            tp_log("Inicializando Lift100 desde safe_pose...")
+            or_lift.init()
+            lifter_wait_ready()
+            lifter_check_error()
+
+            # 3) Determinar nivel objetivo según el progreso guardado (camas actuales)
+            try:
+                l_layer = (System_Layer_L if (System_Layer_L is not None) else 0)
+                r_layer = (System_Layer_R if (System_Layer_R is not None) else 0)
+            except:
+                l_layer = 0
+                r_layer = 0
+
+            tgt_layer = (l_layer if (l_layer >= r_layer) else r_layer)
+            tgt_level = lifter_level_for_layer(tgt_layer)
+
+            tp_log("Re-subiendo Lift100 a nivel " + str(tgt_level) +
+                    " segun progreso (L=" + str(l_layer) + ", R=" + str(r_layer) + ").")
+
+            # Mover físicamente + sincronizar frames
+            _lifter_do_set_level(tgt_level)
+            _lifter_level = tgt_level
+            apply_level_to_frames(tgt_level)
+
+            # 4) Ir a Home ya con el lifter en su nivel correcto
+            safe_home()
+
+        else:
+            # Flujo normal: init si hace falta y luego sincronizar frames por posición real
+            lifter_safe_init()
+
+            if or_lift.isconn():
+                pos = or_lift.get_pos()
+                level_actual = lifter_level_from_pos(pos)
+                tp_log("Lift100 detectado en pos=" + str(pos) +
+                        " mm, nivel logico estimado=" + str(level_actual))
+            else:
+                tp_log("Lift100 no conectado al inicio: se asume nivel 0.")
+                level_actual = 0
+
+            _lifter_level = level_actual
+            apply_level_to_frames(level_actual)
+
+    # ============================================================
+    # GATE DEL LIFTER (ANTES DEL PRE-MENU y ANTES DEL MENU)
+    # - Si lifter no está OK (conectado/init/sin error/pos OK), NO avanza.
+    # ============================================================
+    if not lifter_gate_or_stop():
+        return
+
+    # ============================
+    # PRE-MENU: ajustar lifter según progreso guardado
+    # (SIN try/except pass; si falla, debe detenerse y NO mostrar menú)
+    # ============================
+    # Sincroniza nivel lógico con posición REAL
+    pos = or_lift.get_pos()
+    _lifter_level = lifter_level_from_pos(pos)
+
+    # Calcula capa “más alta” guardada (la que manda la altura necesaria)
+    # (manejo defensivo por si alguna es None)
+    try:
+        l_layer = (System_Layer_L if (System_Layer_L is not None) else 0)
+        r_layer = (System_Layer_R if (System_Layer_R is not None) else 0)
+    except:
+        l_layer = 0
+        r_layer = 0
+
+    saved_layer = (l_layer if (l_layer >= r_layer) else r_layer)
+    target_level = lifter_level_for_layer(saved_layer)
+
+    # Si hace falta, mueve lifter a ese nivel ANTES del menú
+    if target_level != _lifter_level:
+        # Recomendado: robot a safe_pose antes de mover lifter
+        if not _is_safe_pose():
+            movej(safe_pose, v=vj_mto, a=aj_mto)
+
+        lifter_set_level("L", target_level)  # usa tu función existente (mueve lifter + frames)
+        safe_home()  # regresa a home ya con lifter correcto
+
+        # re-sincroniza variable local
+        _lifter_level = target_level
 
     # ----------------- Menu principal -----------------------------
-    op = ask_main_operation()
+    while True:
+        op = ask_main_operation()
 
-    if op == 2:
-        go_to_maintenance_mode()
-        return
+        if op == 2:
+            go_to_maintenance_mode()
+            return
 
-    # ----------------- PALETIZAR (ambos lados) --------------------
-    tp_log("Operacion seleccionada: PALETIZAR (ambos lados).")
+        # ----------------- PALETIZAR (ambos lados) --------------------
+        tp_log("Operacion seleccionada: PALETIZAR (ambos lados).")
 
-    start_side = get_configured_start_side()   # 'L' o 'R'
-    layer = ask_layer(start_side)              # 0-based
-    slot  = ask_slot(start_side, layer)        # 0-based
+        start_side = get_configured_start_side()   # 'L' o 'R'
+        layer = ask_layer(start_side)              # 0-based
+        slot  = ask_slot(start_side, layer)        # 0-based
 
-    while not warn_if_starting_before_last(start_side, layer, slot):
-        layer = ask_layer(start_side)
-        slot  = ask_slot(start_side, layer)
+        while not warn_if_starting_before_last(start_side, layer, slot):
+            layer = ask_layer(start_side)
+            slot  = ask_slot(start_side, layer)
 
-    system_update_progress(start_side, layer, slot)
+        system_update_progress(start_side, layer, slot)
 
-    plc_set_robot_state(ROBOT_STATE_NORMAL)
+        plc_set_robot_state(ROBOT_STATE_NORMAL)
 
-    tp_log("Inicio en " + start_side +
-           " L" + str(layer+1) +
-           " S" + str(slot+1))
+        tp_log("Inicio en " + start_side +
+                " L" + str(layer+1) +
+                " S" + str(slot+1))
 
-    other_side = "R" if start_side == "L" else "L"
-    plc_set_robot_state(ROBOT_STATE_NORMAL)
-    ok_first = run_side_once(start_side, layer, slot)
+        other_side = "R" if start_side == "L" else "L"
+        plc_set_robot_state(ROBOT_STATE_NORMAL)
+        ok_first = run_side_once(start_side, layer, slot)
 
-    # Si hubo fallo (p.ej. vacío) o se activó mantenimiento, no seguimos al otro lado
-    if (not ok_first) or _in_maintenance:
-        tp_log("Abortando despues del primer lado (fallo o mantenimiento).")
-        return
+        # Si hubo fallo (p.ej. vacío) o se activó mantenimiento, no seguimos al otro lado
+        if (not ok_first) or _in_maintenance:
+            tp_log("Abortando despues del primer lado (fallo o mantenimiento).")
+            return
 
-    # Si se activo mantenimiento en el primer lado, no seguimos
-    if _in_maintenance:
-        tp_log("Modo mantenimiento activo tras primer lado. No se paletiza el otro lado.")
-        return
+        # Si se activo mantenimiento en el primer lado, no seguimos
+        if _in_maintenance:
+            tp_log("Modo mantenimiento activo tras primer lado. No se paletiza el otro lado.")
+            return
 
-    if not is_pallet_present(other_side):
-        tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
-        tp_popup("Coloque una tarima en el lado " + other_side + " para continuar.", DR_PM_MESSAGE)
-        wait_pallet_present(other_side)
+        if not is_pallet_present(other_side):
+            tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
+            tp_popup("Coloque tarima para continuar.", DR_PM_MESSAGE)
+            wait_pallet_present(other_side)
 
-    tp_log("Iniciando lado " + other_side + " desde L1 S1.")
-    plc_set_robot_state(ROBOT_STATE_NORMAL)
-    run_from(other_side, 0, 0)
+        tp_log("Iniciando lado " + other_side + " desde L1 S1.")
+        plc_set_robot_state(ROBOT_STATE_NORMAL)
+        run_from(other_side, 0, 0)
 
-    if _in_maintenance:
-        tp_log("Modo mantenimiento activo durante el segundo lado. Saliendo sin finish_side.")
-        return
+        if _in_maintenance:
+            tp_log("Modo mantenimiento activo durante el segundo lado. Saliendo sin finish_side.")
+            return
 
-    finish_side(other_side)
+        complete_side(other_side)
 
-    if not _in_maintenance:
-        movej(home, v=vj_fast, a=aj_slow)
-        plc_set_robot_state(ROBOT_STATE_IDLE)
-        plc_vacuum_idle()
-        plc_set_pick_mode("idle")
-    else:
-        tp_log("Modo mantenimiento activo. No se regresa a home.")
+        if not _in_maintenance:
+            movej(home, v=vj_slow, a=aj_slow)
+            plc_set_robot_state(ROBOT_STATE_IDLE)
+            plc_vacuum_idle()
+            plc_set_pick_mode("idle")
 
+            # Ambos lados terminados: volver automaticamente al menu principal
+            continue
 
+        else:
+            tp_log("Modo mantenimiento activo. No se regresa a home.")
+            return
 # Llamada al MAIN para iniciar el flujo cuando se ejecuta el script.
 main()
