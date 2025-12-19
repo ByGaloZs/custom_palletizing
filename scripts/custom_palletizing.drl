@@ -58,7 +58,7 @@ home = posj(-90.00, 0.00, 90.00, 0.00, 90.00, 90.00)
 
 # Posiciones "up" sobre zonas clave (hubs de seguridad):
 # Estas son posturas en joint encima de las zonas principales. Se usan como puntos intermedios seguros.
-up_conv  = posj(-80.61, 29.87, 65.62, 0.00, 84.50, 99.38)   # Hub sobre conveyor
+up_conv  = posj(-91.09, 19.36, 78.55, 0.00, 82.15, 88.91)   # Hub sobre conveyor
 up_left  = posj(4.58, -8.86, 98.00, 0.00, 90.85, 94.58)     # Hub sobre pallet izquierdo
 up_right = posj(-175.42, -8.86, 98.01, 0.00, 90.86, 94.58)  # Hub sobre pallet derecho
 
@@ -709,7 +709,7 @@ def lifter_set_level(side, level):
       - Aplica la compensación de frames con apply_level_to_frames(level).
       - Actualiza _lifter_level.
     """
-    global _lifter_level, _in_maintenance
+    global _lifter_level
     # Protección: si ya estamos en ese nivel lógico, no hacer nada
     if level == _lifter_level:
         tp_log("Lift100 ya en nivel lógico " + str(level) + ".")
@@ -762,222 +762,222 @@ def lifter_restore_frames():
 left_layers = [
     # LAYER 1 (Left)
     [
-        (105.0, 402.0, 265.0, -180.0, 0.0,  90.0),
-        (593.0,  90.0, 265.0, -180.0, 0.0, -180.0), #
-        (593.0, 265.0, 265.0, -180.0, 0.0, -180.0),
-        (593.0, 440.0, 265.0, -180.0, 0.0, -180.0),
-        (593.0, 615.0, 265.0, -180.0, 0.0, -180.0),
-        (593.0, 790.0, 265.0, -180.0, 0.0, -180.0),
-        (593.0, 965.0, 265.0, -180.0, 0.0, -180.0),
-        (593.0,1140.0, 265.0, -180.0, 0.0, -180.0),
-        (105.0,1212.0, 265.0, -180.0, 0.0,  90.0)
+        (105.0, 402.0, 235.0, -180.0, 0.0,  90.0),
+        (588.0,  90.0, 235.0, -180.0, 0.0, -180.0), 
+        (588.0, 265.0, 235.0, -180.0, 0.0, -180.0),
+        (588.0, 440.0, 235.0, -180.0, 0.0, -180.0),
+        (588.0, 615.0, 235.0, -180.0, 0.0, -180.0),
+        (588.0, 790.0, 235.0, -180.0, 0.0, -180.0),
+        (588.0, 965.0, 235.0, -180.0, 0.0, -180.0),
+        (588.0,1140.0, 235.0, -180.0, 0.0, -180.0),
+        (105.0, 1197.0, 235.0, -180.0, 0.0,  90.0)
     ],
     # LAYER 2 (Left)
     [
-        (915.0, 812.0, 386.0, -180.0, 0.0,  90.0),
-        (915.0, 407.0, 386.0, -180.0, 0.0,  90.0),
-        (418.0,  90.0, 386.0, -180.0, 0.0, -180.0),
-        (418.0, 265.0, 386.0, -180.0, 0.0, -180.0), #
-        (418.0, 440.0, 386.0, -180.0, 0.0, -180.0),
-        (418.0, 615.0, 386.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0, 386.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0, 386.0, -180.0, 0.0, -180.0),
-        (418.0,1140.0, 386.0, -180.0, 0.0, -180.0)
+        (900.0, 812.0, 365.0, -180.0, 0.0,  90.0),
+        (900.0, 407.0, 365.0, -180.0, 0.0,  90.0),
+        (418.0,  90.0, 365.0, -180.0, 0.0, -180.0),
+        (418.0, 265.0, 365.0, -180.0, 0.0, -180.0), 
+        (418.0, 440.0, 365.0, -180.0, 0.0, -180.0),
+        (418.0, 615.0, 365.0, -180.0, 0.0, -180.0),
+        (418.0, 790.0, 365.0, -180.0, 0.0, -180.0),
+        (418.0, 965.0, 365.0, -180.0, 0.0, -180.0),
+        (418.0,1140.0, 365.0, -180.0, 0.0, -180.0)
     ],
     # LAYER 3 (Left)
     [
-        (105.0, 402.0, 507.0, -180.0, 0.0,  90.0),
-        (593.0,  90.0, 507.0, -180.0, 0.0, -180.0),
-        (593.0, 265.0, 507.0, -180.0, 0.0, -180.0),
-        (593.0, 440.0, 507.0, -180.0, 0.0, -180.0),
-        (593.0, 615.0, 507.0, -180.0, 0.0, -180.0),
-        (593.0, 790.0, 507.0, -180.0, 0.0, -180.0),
-        (593.0, 965.0, 507.0, -180.0, 0.0, -180.0),
-        (593.0,1140.0, 507.0, -180.0, 0.0, -180.0),
-        (105.0,1212.0, 507.0, -180.0, 0.0,  90.0)
+        (105.0, 402.0, 495.0, -180.0, 0.0,  90.0),
+        (588.0,  90.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0, 265.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0, 440.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0, 615.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0, 790.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0, 965.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0,1140.0, 495.0, -180.0, 0.0, -180.0),
+        (105.0,1197.0, 495.0, -180.0, 0.0,  90.0)
     ],
     # LAYER 4 (Left)
     [
-        (915.0, 812.0, 628.0, -180.0, 0.0,  90.0),
-        (915.0, 407.0, 628.0, -180.0, 0.0,  90.0), 
-        (418.0,  90.0, 628.0, -180.0, 0.0, -180.0), #
-        (418.0, 265.0, 628.0, -180.0, 0.0, -180.0),
-        (418.0, 440.0, 628.0, -180.0, 0.0, -180.0),
-        (418.0, 615.0, 628.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0, 628.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0, 628.0, -180.0, 0.0, -180.0),
-        (418.0,1140.0, 628.0, -180.0, 0.0, -180.0)
+        (900.0, 812.0, 625.0, -180.0, 0.0,  90.0),
+        (900.0, 407.0, 625.0, -180.0, 0.0,  90.0), 
+        (418.0,  90.0, 625.0, -180.0, 0.0, -180.0), 
+        (418.0, 265.0, 625.0, -180.0, 0.0, -180.0),
+        (418.0, 440.0, 625.0, -180.0, 0.0, -180.0),
+        (418.0, 615.0, 625.0, -180.0, 0.0, -180.0),
+        (418.0, 790.0, 625.0, -180.0, 0.0, -180.0),
+        (418.0, 965.0, 625.0, -180.0, 0.0, -180.0),
+        (418.0,1140.0, 625.0, -180.0, 0.0, -180.0)
     ],
     # LAYER 5 (Left)
     [
-        (105.0, 402.0, 749.0, -180.0, 0.0,  90.0),
-        (593.0,  90.0, 749.0, -180.0, 0.0, -180.0),
-        (593.0, 265.0, 749.0, -180.0, 0.0, -180.0),
-        (593.0, 440.0, 749.0, -180.0, 0.0, -180.0),
-        (593.0, 615.0, 749.0, -180.0, 0.0, -180.0),
-        (593.0, 790.0, 749.0, -180.0, 0.0, -180.0),
-        (593.0, 965.0, 749.0, -180.0, 0.0, -180.0),
-        (593.0,1140.0, 749.0, -180.0, 0.0, -180.0),
-        (105.0,1212.0, 749.0, -180.0, 0.0,  90.0)
+        (105.0, 402.0, 755.0, -180.0, 0.0,  90.0),
+        (588.0,  90.0, 755.0, -180.0, 0.0, -180.0),
+        (588.0, 265.0, 755.0, -180.0, 0.0, -180.0),
+        (588.0, 440.0, 755.0, -180.0, 0.0, -180.0),
+        (588.0, 615.0, 755.0, -180.0, 0.0, -180.0),
+        (588.0, 790.0, 755.0, -180.0, 0.0, -180.0),
+        (588.0, 965.0, 755.0, -180.0, 0.0, -180.0),
+        (588.0,1140.0, 755.0, -180.0, 0.0, -180.0),
+        (105.0,1197.0, 755.0, -180.0, 0.0,  90.0)
     ],
     # LAYER 6 (Left)
     [
-        (915.0, 812.0, 867.0, -180.0, 0.0,  90.0),
-        (915.0, 407.0, 867.0, -180.0, 0.0,  90.0),
-        (418.0,  90.0, 867.0, -180.0, 0.0, -180.0), #
-        (418.0, 265.0, 867.0, -180.0, 0.0, -180.0),
-        (418.0, 440.0, 867.0, -180.0, 0.0, -180.0), #
-        (418.0, 615.0, 867.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0, 867.0, -180.0, 0.0, -180.0), #
-        (418.0, 965.0, 867.0, -180.0, 0.0, -180.0),
-        (418.0,1140.0, 867.0, -180.0, 0.0, -180.0)
+        (900.0, 812.0, 885.0, -180.0, 0.0,  90.0),
+        (900.0, 407.0, 885.0, -180.0, 0.0,  90.0),
+        (418.0,  90.0, 885.0, -180.0, 0.0, -180.0), 
+        (418.0, 265.0, 885.0, -180.0, 0.0, -180.0),
+        (418.0, 440.0, 885.0, -180.0, 0.0, -180.0), 
+        (418.0, 615.0, 885.0, -180.0, 0.0, -180.0),
+        (418.0, 790.0, 885.0, -180.0, 0.0, -180.0), 
+        (418.0, 965.0, 885.0, -180.0, 0.0, -180.0),
+        (418.0,1140.0, 885.0, -180.0, 0.0, -180.0)
     ],
     # LAYER 7 (Left)
     [
-        (105.0, 402.0, 991.0, -180.0, 0.0,  90.0),
-        (593.0,  90.0, 991.0, -180.0, 0.0, -180.0),
-        (593.0, 265.0, 991.0, -180.0, 0.0, -180.0),
-        (593.0, 440.0, 991.0, -180.0, 0.0, -180.0),
-        (593.0, 615.0, 991.0, -180.0, 0.0, -180.0),
-        (593.0, 790.0, 991.0, -180.0, 0.0, -180.0),
-        (593.0, 965.0, 991.0, -180.0, 0.0, -180.0), #
-        (593.0,1140.0, 991.0, -180.0, 0.0, -180.0),
-        (105.0,1212.0, 991.0, -180.0, 0.0,  90.0)
+        (105.0, 402.0, 1015.0, -180.0, 0.0,  90.0),
+        (588.0,  90.0, 1015.0, -180.0, 0.0, -180.0),
+        (588.0, 265.0, 1015.0, -180.0, 0.0, -180.0),
+        (588.0, 440.0, 1015.0, -180.0, 0.0, -180.0),
+        (588.0, 615.0, 1015.0, -180.0, 0.0, -180.0),
+        (588.0, 790.0, 1015.0, -180.0, 0.0, -180.0),
+        (588.0, 965.0, 1015.0, -180.0, 0.0, -180.0), 
+        (588.0,1140.0, 1015.0, -180.0, 0.0, -180.0),
+        (105.0,1197.0, 1015.0, -180.0, 0.0,  90.0)
     ],
     # LAYER 8 (Left)
     [
-        (915.0, 812.0, 1107.0, -180.0, 0.0,  90.0),
-        (915.0, 407.0, 1107.0, -180.0, 0.0,  90.0),
-        (418.0,  90.0, 1107.0, -180.0, 0.0, -180.0),
-        (418.0, 265.0, 1107.0, -180.0, 0.0, -180.0),
-        (418.0, 440.0, 1107.0, -180.0, 0.0, -180.0),
-        (418.0, 615.0, 1107.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0, 1107.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0, 1107.0, -180.0, 0.0, -180.0), #
-        (418.0,1140.0, 1107.0, -180.0, 0.0, -180.0)
+        (900.0, 812.0, 1145.0, -180.0, 0.0,  90.0),
+        (900.0, 407.0, 1145.0, -180.0, 0.0,  90.0),
+        (418.0,  90.0, 1145.0, -180.0, 0.0, -180.0),
+        (418.0, 265.0, 1145.0, -180.0, 0.0, -180.0),
+        (418.0, 440.0, 1145.0, -180.0, 0.0, -180.0),
+        (418.0, 615.0, 1145.0, -180.0, 0.0, -180.0),
+        (418.0, 790.0, 1145.0, -180.0, 0.0, -180.0),
+        (418.0, 965.0, 1145.0, -180.0, 0.0, -180.0), 
+        (418.0,1140.0, 1145.0, -180.0, 0.0, -180.0)
     ],
     # LAYER 9 (Left)
     [
-        (105.0, 402.0,1227.0, -180.0, 0.0,  90.0),
-        (593.0,  90.0,1227.0, -180.0, 0.0, -180.0),
-        (593.0, 265.0,1227.0, -180.0, 0.0, -180.0),
-        (593.0, 440.0,1227.0, -180.0, 0.0, -180.0),
-        (593.0, 615.0,1227.0, -180.0, 0.0, -180.0),
-        (593.0, 790.0,1227.0, -180.0, 0.0, -180.0),
-        (593.0, 965.0,1227.0, -180.0, 0.0, -180.0), #
-        (593.0,1140.0,1227.0, -180.0, 0.0, -180.0),
-        (105.0,1212.0,1227.0, -180.0, 0.0,  90.0)
+        (105.0, 402.0,1275.0, -180.0, 0.0,  90.0),
+        (588.0,  90.0,1275.0, -180.0, 0.0, -180.0),
+        (588.0, 265.0,1275.0, -180.0, 0.0, -180.0),
+        (588.0, 440.0,1275.0, -180.0, 0.0, -180.0),
+        (588.0, 615.0,1275.0, -180.0, 0.0, -180.0),
+        (588.0, 790.0,1275.0, -180.0, 0.0, -180.0),
+        (588.0, 965.0,1275.0, -180.0, 0.0, -180.0), 
+        (588.0,1140.0,1275.0, -180.0, 0.0, -180.0),
+        (105.0,1197.0,1275.0, -180.0, 0.0,  90.0)
     ]
 ]
 
 right_layers = [
     # LAYER 1 (Right)
     [
-        (905.0, 402.0, 235.0, -180.0, 0.0, -90.0),
-        (417.0,  80.0, 235.0, -180.0, 0.0,   0.0),
-        (417.0, 255.0, 235.0, -180.0, 0.0,   0.0),
-        (417.0, 430.0, 235.0, -180.0, 0.0,   0.0),
-        (417.0, 605.0, 235.0, -180.0, 0.0,   0.0),
-        (417.0, 780.0, 235.0, -180.0, 0.0,   0.0),
-        (417.0, 955.0, 235.0, -180.0, 0.0,   0.0),
-        (417.0,1130.0, 235.0, -180.0, 0.0,   0.0),
-        (905.0,1213.0, 235.0, -180.0, 0.0, -90.0)
+        (915.0, 402.0, 235.0, -180.0, 0.0, -90.0),
+        (432.0,  85.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0, 260.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0, 435.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0, 610.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0, 785.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0, 960.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0,1135.0, 235.0, -180.0, 0.0,   0.0),
+        (915.0,1203.0, 235.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 2 (Right)
     [
-        ( 95.0, 808.0, 366.0, -180.0, 0.0, -90.0),
-        ( 95.0, 402.0, 366.0, -180.0, 0.0, -90.0),
-        (593.0,  80.0, 366.0, -180.0, 0.0,   0.0),
-        (593.0, 255.0, 366.0, -180.0, 0.0,   0.0),
-        (593.0, 430.0, 366.0, -180.0, 0.0,   0.0),
-        (593.0, 605.0, 366.0, -180.0, 0.0,   0.0),
-        (593.0, 780.0, 366.0, -180.0, 0.0,   0.0),
-        (593.0, 955.0, 366.0, -180.0, 0.0,   0.0),
-        (593.0,1130.0, 366.0, -180.0, 0.0,   0.0)
+        (115.0, 808.0, 365.0, -180.0, 0.0, -90.0),
+        (115.0, 402.0, 365.0, -180.0, 0.0, -90.0),
+        (603.0,  80.0, 365.0, -180.0, 0.0,   0.0),
+        (603.0, 255.0, 365.0, -180.0, 0.0,   0.0),
+        (603.0, 430.0, 365.0, -180.0, 0.0,   0.0),
+        (603.0, 605.0, 365.0, -180.0, 0.0,   0.0),
+        (603.0, 780.0, 365.0, -180.0, 0.0,   0.0),
+        (603.0, 955.0, 365.0, -180.0, 0.0,   0.0),
+        (603.0,1130.0, 365.0, -180.0, 0.0,   0.0)
     ],
     # LAYER 3 (Right)
     [
-        (905.0, 402.0, 507.0, -180.0, 0.0, -90.0),
-        (417.0,  80.0, 507.0, -180.0, 0.0,   0.0),
-        (417.0, 255.0, 507.0, -180.0, 0.0,   0.0),
-        (417.0, 430.0, 507.0, -180.0, 0.0,   0.0),
-        (417.0, 605.0, 507.0, -180.0, 0.0,   0.0),
-        (417.0, 780.0, 507.0, -180.0, 0.0,   0.0),
-        (417.0, 955.0, 507.0, -180.0, 0.0,   0.0),
-        (417.0,1130.0, 507.0, -180.0, 0.0,   0.0),
-        (905.0,1213.0, 507.0, -180.0, 0.0, -90.0)
+        (915.0, 402.0, 495.0, -180.0, 0.0, -90.0),
+        (432.0,  85.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0, 260.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0, 435.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0, 610.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0, 785.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0, 960.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0,1135.0, 495.0, -180.0, 0.0,   0.0),
+        (915.0,1203.0, 495.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 4 (Right)
     [
-        ( 95.0, 808.0, 628.0, -180.0, 0.0, -90.0),
-        ( 95.0, 402.0, 628.0, -180.0, 0.0, -90.0),
-        (593.0,  80.0, 628.0, -180.0, 0.0,   0.0),
-        (593.0, 255.0, 628.0, -180.0, 0.0,   0.0),
-        (593.0, 430.0, 628.0, -180.0, 0.0,   0.0),
-        (593.0, 605.0, 628.0, -180.0, 0.0,   0.0),
-        (593.0, 780.0, 628.0, -180.0, 0.0,   0.0),
-        (593.0, 955.0, 628.0, -180.0, 0.0,   0.0),
-        (593.0,1130.0, 628.0, -180.0, 0.0,   0.0)
+        (115.0, 808.0, 625.0, -180.0, 0.0, -90.0),
+        (115.0, 402.0, 625.0, -180.0, 0.0, -90.0),
+        (603.0,  80.0, 625.0, -180.0, 0.0,   0.0),
+        (603.0, 255.0, 625.0, -180.0, 0.0,   0.0),
+        (603.0, 430.0, 625.0, -180.0, 0.0,   0.0),
+        (603.0, 605.0, 625.0, -180.0, 0.0,   0.0),
+        (603.0, 780.0, 625.0, -180.0, 0.0,   0.0),
+        (603.0, 955.0, 625.0, -180.0, 0.0,   0.0),
+        (603.0,1130.0, 625.0, -180.0, 0.0,   0.0)
     ],
     # LAYER 5 (Right)
     [
-        (905.0, 402.0, 739.0, -180.0, 0.0, -90.0),
-        (417.0, 80.0, 739.0, -180.0, 0.0, 0.0),
-        (417.0, 255.0, 739.0, -180.0, 0.0, 0.0),
-        (417.0, 430.0, 739.0, -180.0, 0.0, 0.0),
-        (417.0, 605.0, 739.0, -180.0, 0.0, 0.0),
-        (417.0, 780.0, 739.0, -180.0, 0.0, 0.0),
-        (417.0, 955.0, 739.0, -180.0, 0.0, 0.0),
-        (417.0, 1130.0, 739.0, -180.0, 0.0, 0.0),
-        (905.0, 1213.0, 739.0, -180.0, 0.0, -90.0)
+        (915.0, 402.0, 755.0, -180.0, 0.0, -90.0),
+        (432.0, 85.0, 755.0, -180.0, 0.0, 0.0),
+        (432.0, 260.0, 755.0, -180.0, 0.0, 0.0),
+        (432.0, 435.0, 755.0, -180.0, 0.0, 0.0),
+        (432.0, 610.0, 755.0, -180.0, 0.0, 0.0),
+        (432.0, 785.0, 755.0, -180.0, 0.0, 0.0),
+        (432.0, 960.0, 755.0, -180.0, 0.0, 0.0),
+        (432.0, 1135.0, 755.0, -180.0, 0.0, 0.0),
+        (915.0, 1203.0, 755.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 6 (Right)
     [
-        (95.0, 808.0, 857.0, -180.0, 0.0, -90.0),
-        (95.0, 402.0, 857.0, -180.0, 0.0, -90.0),
-        (593.0, 80.0, 857.0, -180.0, 0.0, 0.0),
-        (593.0, 255.0, 857.0, -180.0, 0.0, 0.0),
-        (593.0, 430.0, 857.0, -180.0, 0.0, 0.0),
-        (593.0, 605.0, 857.0, -180.0, 0.0, 0.0),
-        (593.0, 780.0, 857.0, -180.0, 0.0, 0.0),
-        (593.0, 955.0, 857.0, -180.0, 0.0, 0.0),
-        (593.0, 1130.0, 857.0, -180.0, 0.0, 0.0)
+        (115.0, 808.0, 885.0, -180.0, 0.0, -90.0),
+        (115.0, 402.0, 885.0, -180.0, 0.0, -90.0),
+        (603.0, 80.0, 885.0, -180.0, 0.0, 0.0),
+        (603.0, 255.0, 885.0, -180.0, 0.0, 0.0),
+        (603.0, 430.0, 885.0, -180.0, 0.0, 0.0),
+        (603.0, 605.0, 885.0, -180.0, 0.0, 0.0),
+        (603.0, 780.0, 885.0, -180.0, 0.0, 0.0),
+        (603.0, 955.0, 885.0, -180.0, 0.0, 0.0),
+        (603.0, 1130.0, 885.0, -180.0, 0.0, 0.0)
     ],
     # LAYER 7 (Right)
     [
-        (905.0, 402.0, 981.0, -180.0, 0.0, -90.0),
-        (417.0, 80.0, 981.0, -180.0, 0.0, 0.0),
-        (417.0, 255.0, 981.0, -180.0, 0.0, 0.0),
-        (417.0, 430.0, 981.0, -180.0, 0.0, 0.0),
-        (417.0, 605.0, 981.0, -180.0, 0.0, 0.0),
-        (417.0, 780.0, 981.0, -180.0, 0.0, 0.0),
-        (417.0, 955.0, 981.0, -180.0, 0.0, 0.0),
-        (417.0, 1130.0, 981.0, -180.0, 0.0, 0.0),
-        (905.0, 1213.0, 981.0, -180.0, 0.0, -90.0)
+        (915.0, 402.0, 1015.0, -180.0, 0.0, -90.0),
+        (432.0, 85.0, 1015.0, -180.0, 0.0, 0.0),
+        (432.0, 260.0, 1015.0, -180.0, 0.0, 0.0),
+        (432.0, 435.0, 1015.0, -180.0, 0.0, 0.0),
+        (432.0, 610.0, 1015.0, -180.0, 0.0, 0.0),
+        (432.0, 785.0, 1015.0, -180.0, 0.0, 0.0),
+        (432.0, 960.0, 1015.0, -180.0, 0.0, 0.0),
+        (432.0, 1135.0, 1015.0, -180.0, 0.0, 0.0),
+        (915.0, 1203.0, 1015.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 8 (Right)
     [
-        (95.0, 808.0, 1152.0, -180.0, 0.0, -90.0),
-        (95.0, 402.0, 1152.0, -180.0, 0.0, -90.0),
-        (593.0, 80.0, 1152.0, -180.0, 0.0, 0.0 ),
-        (593.0, 255.0, 1152.0, -180.0, 0.0, 0.0),
-        (593.0, 430.0, 1152.0, -180.0, 0.0, 0.0),
-        (593.0, 605.0, 1152.0, -180.0, 0.0, 0.0),
-        (593.0, 780.0, 1152.0, -180.0, 0.0, 0.0),
-        (593.0, 955.0, 1152.0, -180.0, 0.0, 0.0),
-        (593.0, 1130.0, 1152.0, -180.0, 0.0, 0.0)
+        (115.0, 808.0, 1145.0, -180.0, 0.0, -90.0),
+        (115.0, 402.0, 1145.0, -180.0, 0.0, -90.0),
+        (603.0, 80.0, 1145.0, -180.0, 0.0, 0.0 ),
+        (603.0, 255.0, 1145.0, -180.0, 0.0, 0.0),
+        (603.0, 430.0, 1145.0, -180.0, 0.0, 0.0),
+        (603.0, 605.0, 1145.0, -180.0, 0.0, 0.0),
+        (603.0, 780.0, 1145.0, -180.0, 0.0, 0.0),
+        (603.0, 955.0, 1145.0, -180.0, 0.0, 0.0),
+        (603.0, 1130.0, 1145.0, -180.0, 0.0, 0.0)
     ],
     # LAYER 9 (Right)
     [
-        (905.0, 402.0, 1272.0, -180.0, 0.0, -90.0),
-        (417.0, 80.0, 1272.0, -180.0, 0.0, 0.0),
-        (417.0, 255.0, 1272.0, -180.0, 0.0, 0.0),
-        (417.0, 430.0, 1272.0, -180.0, 0.0, 0.0),
-        (417.0, 605.0, 1272.0, -180.0, 0.0, 0.0),
-        (417.0, 780.0, 1272.0, -180.0, 0.0, 0.0),
-        (417.0, 955.0, 1272.0, -180.0, 0.0, 0.0),
-        (417.0, 1130.0, 1272.0, -180.0, 0.0, 0.0),
-        (905.0, 1213.0, 1272.0, -180.0, 0.0, -90.0)
+        (915.0, 402.0, 1275.0, -180.0, 0.0, -90.0),
+        (432.0, 85.0, 1275.0, -180.0, 0.0, 0.0),
+        (432.0, 260.0, 1275.0, -180.0, 0.0, 0.0),
+        (432.0, 435.0, 1275.0, -180.0, 0.0, 0.0),
+        (432.0, 610.0, 1275.0, -180.0, 0.0, 0.0),
+        (432.0, 785.0, 1275.0, -180.0, 0.0, 0.0),
+        (432.0, 960.0, 1275.0, -180.0, 0.0, 0.0),
+        (432.0, 1135.0, 1275.0, -180.0, 0.0, 0.0),
+        (915.0, 1203.0, 1275.0, -180.0, 0.0, -90.0)
     ]
 ]
 
@@ -1207,7 +1207,7 @@ def get_mid(side, layer, slot):
 # =====================================================================
 
 # Pose cartesiana del pick en el conveyor (en conv_frame)
-pick_pose = posx(419.123, -257.692, 887.00, 180.00, 0.00, 0.0, rot_mode)
+pick_pose = posx(243.491, -194.909, 845.643, 180.00, 0.00, 0.0, rot_mode)
 
 
 def get_pick():
@@ -1445,8 +1445,7 @@ def do_pick(mode):
                 return False
 
             # Primera vez que fallan los max_attempts
-            tp_popup("Fallo de vacio en pick. Revise gripper y conveyor.", DR_PM_ALARM)
-            resp = ask_int_required("1=Reintentar una vez mas, 2=Llamar mantenimiento", 1, 2)
+            resp = ask_int_required("1=Reintentar, 2= Mantenimiento", 1, 2)
 
 
             if resp == 1:
@@ -1557,7 +1556,6 @@ def do_place(side, layer, slot, rtype):
     #    ya estamos en el hub; ahora se le pregunta al operador qué hacer.
     plc_set_vacuum_loss(1)
 
-    tp_popup("Perdida de vacio antes de place. Revise la tarima.", DR_PM_ALARM)
     resp = ask_int_required("1=Continuar paletizado (se considera good place), 2=Llamar mantenimiento", 1, 2)
 
     if resp == 1:
@@ -1779,50 +1777,12 @@ def warn_if_starting_before_last(side, layer, slot):
         return True
 
     # Advertencia fuerte + confirmación
-    msg = ("ADVERTENCIA: El inicio seleccionado es ANTERIOR al último progreso guardado, El elevador (Lift100) podría BAJAR y ocasionar una colisión")
+    msg = ("ADVERTENCIA: El inicio seleccionado es ANTERIOR al último progreso guardado")
     tp_popup(msg, DR_PM_WARNING)
 
-    resp = ask_int_required("Confirmar: 1=Continuar, 2=Reingresar", 1, 2)
+    resp = ask_int_required("1=Continuar, 2=Reingresar", 1, 2)
     return (resp == 1)
 
-
-def ask_mode():
-    """
-    Pregunta el modo de paletizado:
-      1 -> Solo un lado (modo single)
-      2 -> Ambos lados (modo dual)
-
-    Devuelve 'single' o 'both'.
-    """
-    msg = "Seleccione modo de paletizado: 1 = Solo un lado, 2 = Ambos lados"
-    v = ask_int_required(msg, 1, 2)
-
-    if v == 1:
-        tp_log("Modo seleccionado: SOLO UN LADO.")
-        return "single"
-    else:
-        tp_log("Modo seleccionado: AMBOS LADOS.")
-        return "both"
-
-
-def ask_side():
-    """
-    Pregunta en qué lado quiere iniciar el usuario.
-    El usuario introduce 'A' o 'B', que se mapean a:
-      'A'/'a' -> 'L' (Left)
-      'B'/'b' -> 'R' (Right)
-    No permite dejar vacío ni otro caracter.
-    """
-    while True:
-        s = ask_str_required("Seleccione en que Lado quiere iniciar A/B")
-
-        if s == "A" or s == "a":
-            return "L"
-        if s == "B" or s == "b":
-            return "R"
-
-        tp_log("Entrada invalida en ask_side(): '" + str(s) + "'.")
-        tp_popup("Entrada invalida. Use A para Izquierda o B para Derecha.", DR_PM_WARNING)
 
 def ask_layer(side):
     """
@@ -1843,27 +1803,49 @@ def ask_slot(side, layer):
     return v - 1  # 0-based
 
 
-def ask_initial_action():
+def get_configured_start_side():
     """
-    Menu inicial:
-      1 -> Home seguro
-      2 -> Mantenimiento
-      3 -> Paletizado
+    Devuelve el lado inicial configurado por variable de sistema.
+
+    Reglas:
+      - El sistema SIEMPRE paletiza en ambos lados.
+      - El lado inicial NO lo elige el operador; se define con System_StartSide.
+
+    Se espera:
+      System_StartSide = "L" o "R"
+
+    Si la variable no existe, es invalida, o viene vacia, se asume "R".
     """
-    msg = "Seleccione accion inicial: 1=Home seguro, 2=Mantenimiento, 3=Paletizado"
-    return ask_int_required(msg, 1, 3)
+    try:
+        s = System_StartSide
+    except:
+        s = "R"
+
+    if s is None:
+        return "R"
+
+    # Normalizar a string y mayuscula
+    try:
+        s2 = str(s).strip().upper()
+    except:
+        s2 = "R"
+
+    if s2 == "L":
+        return "L"
+    return "R"
 
 
-def ask_home_followup_action():
+def ask_main_operation():
     """
-    Menu despues de hacer home seguro:
-      1 -> Mantenimiento
-      2 -> Paletizado
+    Popup inicial del programa (nuevo flujo):
+
+      1 -> Paletizar
+      2 -> Enviar a mantenimiento
+
+    Devuelve 1 o 2.
     """
-    msg = "Seleccione accion: 1=Mantenimiento, 2=Paletizado"
+    msg = "Seleccione operacion: 1=Paletizar, 2=Mantenimiento"
     return ask_int_required(msg, 1, 2)
-
-
 
 
 # =====================================================================
@@ -2067,7 +2049,6 @@ def finish_side(side):
     plc_set_robot_state(ROBOT_STATE_MANUAL)
     tp_popup("Retire la tarima terminada del lado " + side + ".", DR_PM_MESSAGE)
     wait_remove_finished_pallet(side)
-    tp_popup("Cuidado! El paletizado continuará", DR_PM_WARNING)
 
     lifter_restore_frames()
     # After manual pallet removal, we are back to standby (waiting / next decisions)
@@ -2208,7 +2189,6 @@ def run_side_once(side, layer, slot):
         tp_log("No hay tarima en el lado " + side + ". Esperando a que la coloquen...")
         tp_popup("No hay tarima esperando a que la coloquen...", DR_PM_MESSAGE)
         wait_pallet_present(side)
-        tp_popup("Cuidado! El paletizado continuará", DR_PM_WARNING)
 
     n_layers = len(layers)
     n_slots_in_layer = len(layers[layer])
@@ -2228,18 +2208,18 @@ def run_side_once(side, layer, slot):
             tp_log("Abortando lado " + side +
                    " por fallo de vacío en la última caja (arranque especial).")
             finish_side(side)
-            return
+            return False
 
         # Colocar Half-B en ese slot
         ok2 = do_place(side, layer, slot, "half_b")
         if not ok2:
             tp_log("run_side_once: mantenimiento solicitado en ultima caja (arranque especial).")
             finish_side(side)
-            return
+            return False
 
         # Finalizar lado (posición segura + retirar tarima + restaurar frames/lifter)
         finish_side(side)
-        return
+        return True
 
     # ---------- CASO ESPECIAL 2: slot inicial es destino Half-B ----------
     # Si el usuario empieza en un slot que es destino Half-B, significa que
@@ -2257,14 +2237,14 @@ def run_side_once(side, layer, slot):
             tp_log("Abortando lado " + side +
                    " por fallo de vacío al arrancar en Half-B.")
             finish_side(side)
-            return
+            return False
             
         # Colocar Half-B en este slot
         ok2 = do_place(side, layer, slot, "half_b")
         if not ok2:
             tp_log("run_side_once: mantenimiento solicitado al colocar Half-B inicial.")
             finish_side(side)
-            return
+            return False
 
         # Registrar este destino Half-B como lleno
         _halfB_filled.add((side, layer, slot))
@@ -2282,9 +2262,15 @@ def run_side_once(side, layer, slot):
         if next_layer < len(layers):
             run_from(side, next_layer, next_slot)
 
+        # Si se activó mantenimiento en este lado, salir (evita tocar el otro lado en main)
+        if _in_maintenance:
+            tp_log("run_side_once: mantenimiento activo. Saliendo del lado " + side + ".")
+            finish_side(side)
+            return False
+
         # Al final, terminar el lado
         finish_side(side)
-        return
+        return True
 
     # ----------------- CASO NORMAL: slot inicial NO es destino Half-B -----------------
     # Se asume que arrancamos en un slot que es:
@@ -2300,7 +2286,7 @@ def run_side_once(side, layer, slot):
                " por fallo de vacío en el slot inicial L" +
                str(layer+1) + " S" + str(slot+1))
         finish_side(side)
-        return
+        return False
 
     # Revisar si este slot inicial es Half-A y su destino
     is_half, dl, ds = find_half(side, layer, slot)
@@ -2309,55 +2295,39 @@ def run_side_once(side, layer, slot):
     if not ok_place:
         tp_log("run_side_once: se salio por mantenimiento en slot inicial.")
         finish_side(side)
-        return
+        return False
 
     # Correr el resto del lado desde el siguiente slot
     run_from(side, layer, slot + 1)
 
+    # Si se activó mantenimiento en este lado, no continuar (evita tocar el otro lado en main)
+    if _in_maintenance:
+        tp_log("run_side_once: mantenimiento activo. Saliendo del lado " + side + ".")
+        finish_side(side)
+        return False
+
     # Finalizar lado
     finish_side(side)
+    return True
 
 
 # =====================================================================
 # MAIN
 # =====================================================================
-
 def main():
-    """
-    Flujo principal del programa.
+    global _lifter_level, System_InMaintenance, _in_maintenance
 
-    Flujo:
-      1) Inicializar TCP, tool y lifter, y sincronizar frames segun nivel actual.
-      2) Preguntar accion inicial:
-           1 = Home seguro
-           2 = Mantenimiento
-           3 = Paletizado
-      3) Si se elige Home seguro:
-           - Ejecutar safe_home()
-           - Preguntar:
-                1 = Mantenimiento
-                2 = Paletizado
-      4) Si se elige Mantenimiento (directo o despues de Home):
-           - Ejecutar go_to_maintenance_mode() y terminar.
-      5) Si se elige Paletizado:
-           - Entrar directo al flujo de paletizado
-             (preguntar modo, lado, cama, slot, etc.)
-           - SIN llamar a safe_home automaticamente.
-    """
-    global _lifter_level, _in_maintenance, System_InMaintenance
-
-    # ------------- Configuracion basica de herramienta -------------
+    # ----------------- Configuracion herramienta -----------------
     set_tcp("custom_gripper")
     set_tool_shape("gripper_shape")
     set_tool("gripper_weight", 0.0, 0.2)
 
-    # ------------- Estado inicial hacia el PLC ---------------------
-    # Mantener el modo mantenimiento entre reinicios del programa.
-    # System_InMaintenance: 1 => en/desde mantenimiento, 0 => normal.
+    # ----------------- Estado inicial hacia PLC ------------------
+    # System_InMaintenance: 1 => viene de mantenimiento, 0 => normal
     _in_maintenance = (System_InMaintenance == 1)
 
     if _in_maintenance:
-        # No permitir que STANDBY (u otros) sobreescriban MAINTENANCE.
+        # Evitar que STANDBY u otros estados sobreescriban MAINTENANCE
         plc_enter_maintenance()
     else:
         plc_set_robot_state(ROBOT_STATE_STANDBY)
@@ -2366,8 +2336,28 @@ def main():
         plc_set_vacuum_loss(False)
         plc_set_pick_mode("idle")
 
-# ------------- Inicializacion / sincronizacion del lifter ------
-    safe_home()
+    # ----------------- Recuperacion tras mantenimiento ------------
+    if _in_maintenance:
+        # Reinicio despues de mantenimiento:
+        # 1) Validar que NO haya tarimas presentes (seguridad)
+        # 2) safe_pose -> home global (SIN safe_home para evitar singularidad)
+        wait_no_pallets_present_both_sides()
+
+        if not _is_safe_pose():
+            movej(safe_pose, v=vj_slow, a=aj_slow)
+
+        movej(home, v=vj_slow, a=aj_slow)
+
+        # Limpiar latch de mantenimiento y continuar flujo normal
+        plc_exit_maintenance()
+        System_InMaintenance = 0
+        _in_maintenance = False
+
+    else:
+        # Arranque normal: usar Home Seguro
+        safe_home()
+
+    # ----------------- Lifter init + sincronizacion frames --------
     lifter_safe_init()
 
     if or_lift.isconn():
@@ -2382,150 +2372,61 @@ def main():
     _lifter_level = level_actual
     apply_level_to_frames(level_actual)
 
-        # ------------- Menu inicial: Home / Mantenimiento / Paletizado ---
-    # Si el programa se reinicia mientras el robot está en MAINTENANCE,
-    # SOLO se permite ejecutar Home seguro. Además, antes de permitir cualquier
-    # movimiento, se verifica que NO haya tarimas presentes en L ni en R.
-    if _in_maintenance:
-        plc_enter_maintenance()
-        tp_log("Reinicio en MAINTENANCE: solo se permite Home seguro.")
-        action = ask_int_required("Robot en MANTENIMIENTO. Unica opcion: 1=Home seguro", 1, 1)
-        wait_no_pallets_present_both_sides()
-    else:
-        action = ask_initial_action()
+    # ----------------- Menu principal -----------------------------
+    op = ask_main_operation()
 
-
-    if action == 1:
-        # -----------------
-        # HOME SEGURO
-        # Durante el movimiento queremos reflejar estado NORMAL (robot en operación).
-        # Si venimos de MANTENIMIENTO, el lock impide cambiar con plc_set_robot_state,
-        # por eso usamos plc_force_robot_state SOLO durante el home.
-        # -----------------
-        if _in_maintenance:
-            plc_force_robot_state(ROBOT_STATE_NORMAL)
-        else:
-            plc_set_robot_state(ROBOT_STATE_NORMAL)
-
-        plc_vacuum_idle()
-        safe_home()
-
-        # Al terminar Home seguro, regresar al estado correcto
-        if _in_maintenance:
-            # IMPORTANTE:
-            # Venimos de mantenimiento. Despues del Home seguro queremos:
-            # 1) Resetear la señal/latch de mantenimiento hacia el PLC
-            # 2) Volver a STANDBY para permitir el menú normal
-            plc_exit_maintenance()
-            plc_set_robot_state(ROBOT_STATE_STANDBY)
-            plc_vacuum_idle()
-        else:
-            plc_set_robot_state(ROBOT_STATE_STANDBY)
-            plc_vacuum_idle()
-
-        # Despues de home: elegir entre Mantenimiento o Paletizado
-        next_action = ask_home_followup_action()
-        if next_action == 1:
-            # Mantenimiento
-            go_to_maintenance_mode()
-            return
-        # Si el robot venia de mantenimiento, liberar el latch antes de paletizar
-        plc_exit_maintenance()
-        # Si next_action == 2 -> Paletizado; continua mas abajo SIN safe_home
-
-    elif action == 2:
-        # Mantenimiento directo
+    if op == 2:
         go_to_maintenance_mode()
         return
 
-    else:
-        # action == 3: Paletizado directo
-        # NO se llama safe_home aqui
-        tp_log("Accion inicial: paletizado directo (sin home seguro).")
+    # ----------------- PALETIZAR (ambos lados) --------------------
+    tp_log("Operacion seleccionada: PALETIZAR (ambos lados).")
 
-    # -----------------------------------------------------------------
-    # A partir de aqui: flujo normal de paletizado (igual que antes)
-    # -----------------------------------------------------------------
+    start_side = get_configured_start_side()   # 'L' o 'R'
+    layer = ask_layer(start_side)              # 0-based
+    slot  = ask_slot(start_side, layer)        # 0-based
 
-    mode = ask_mode()        # 'single' o 'both'
+    while not warn_if_starting_before_last(start_side, layer, slot):
+        layer = ask_layer(start_side)
+        slot  = ask_slot(start_side, layer)
 
-    side  = ask_side()       # 'L' o 'R'
-    layer = ask_layer(side)  # 0-based
-    slot  = ask_slot(side, layer)  # 0-based
-
-    while not warn_if_starting_before_last(side, layer, slot):
-        layer = ask_layer(side)
-        slot  = ask_slot(side, layer)
-
-
-    # Guardar selección del operador en variables persistentes
-    system_update_progress(side, layer, slot)
+    system_update_progress(start_side, layer, slot)
 
     plc_set_robot_state(ROBOT_STATE_NORMAL)
 
-    tp_log("Inicio en " + side +
+    tp_log("Inicio en " + start_side +
            " L" + str(layer+1) +
            " S" + str(slot+1))
 
-    other_side = "R" if side == "L" else "L"
+    other_side = "R" if start_side == "L" else "L"
+    plc_set_robot_state(ROBOT_STATE_NORMAL)
+    ok_first = run_side_once(start_side, layer, slot)
 
-    if mode == "single":
-        while True:
-            tp_log("Iniciando ciclo de tarima en lado " + side +
-                   " desde L" + str(layer+1) +
-                   " S" + str(slot+1))
+    # Si hubo fallo (p.ej. vacío) o se activó mantenimiento, no seguimos al otro lado
+    if (not ok_first) or _in_maintenance:
+        tp_log("Abortando despues del primer lado (fallo o mantenimiento).")
+        return
 
-            plc_set_robot_state(ROBOT_STATE_NORMAL)
+    # Si se activo mantenimiento en el primer lado, no seguimos
+    if _in_maintenance:
+        tp_log("Modo mantenimiento activo tras primer lado. No se paletiza el otro lado.")
+        return
 
+    if not is_pallet_present(other_side):
+        tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
+        tp_popup("Coloque una tarima en el lado " + other_side + " para continuar.", DR_PM_MESSAGE)
+        wait_pallet_present(other_side)
 
-            run_side_once(side, layer, slot)
-            # Si durante el ciclo se entró a mantenimiento, salir del bucle
-            if _in_maintenance:
-                tp_log("Modo mantenimiento activo. Saliendo del bucle de tarimas (single).")
-                stop(DR_QSTOP)
-                return
+    tp_log("Iniciando lado " + other_side + " desde L1 S1.")
+    plc_set_robot_state(ROBOT_STATE_NORMAL)
+    run_from(other_side, 0, 0)
 
-            tp_log("Esperando nueva tarima en lado " + side +
-                   " para iniciar una nueva paletizacion...")
-            tp_popup("Coloque una NUEVA tarima en el lado " + side +
-                     " para continuar.", DR_PM_MESSAGE)
+    if _in_maintenance:
+        tp_log("Modo mantenimiento activo durante el segundo lado. Saliendo sin finish_side.")
+        return
 
-            wait_pallet_present(side)
-            tp_popup("Cuidado! El paletizado continuará", DR_PM_WARNING)
+    finish_side(other_side)
 
-            layer = 0
-            slot  = 0
-            tp_log("Nueva tarima detectada en lado " + side +
-                   ". Reiniciando desde L1 S1.")
-
-    else:
-        plc_set_robot_state(ROBOT_STATE_NORMAL)
-        run_side_once(side, layer, slot)
-
-        # Si se activó mantenimiento en el primer lado, no seguimos
-        if _in_maintenance:
-            tp_log("Modo mantenimiento activo tras primer lado. No se paletiza el otro lado.")
-            return
-
-        if not is_pallet_present(other_side):
-            tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
-            tp_popup("Coloque una tarima en el lado " + other_side + " para continuar.", DR_PM_MESSAGE)
-            wait_pallet_present(other_side)
-            tp_popup("Cuidado! El paletizado continuará", DR_PM_WARNING)
-
-        tp_log("Iniciando lado " + other_side + " desde L1 S1.")
-        plc_set_robot_state(ROBOT_STATE_NORMAL)
-        run_from(other_side, 0, 0)
-
-
-        # Si durante el segundo lado se entró en mantenimiento, no hacemos finish_side ni home
-        if _in_maintenance:
-            tp_log("Modo mantenimiento activo durante el segundo lado. Saliendo sin finish_side.")
-            return
-
-        finish_side(other_side)
-
-    # Solo regresar a HOME si NO estamos en modo mantenimiento
     if not _in_maintenance:
         movej(home, v=vj_fast, a=aj_slow)
         plc_set_robot_state(ROBOT_STATE_IDLE)
