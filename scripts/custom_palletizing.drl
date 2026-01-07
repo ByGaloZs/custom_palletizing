@@ -47,12 +47,12 @@ dz_ret = 200.0     # Distancia en Z para retract (RET) después de soltar/tomar 
 # ---------------------- velocidades -----------------
 # Velocidades y aceleraciones de joint (vj/aj) y lineales (vl/al)
 # Se separa en "rápido" y "lento" para poder controlar zonas seguras y zonas de trabajo fino.
-vj_fast = 80;   aj_fast = 40
-vj_slow = 40;   aj_slow = 20
+vj_fast = 110;   aj_fast = 90
+vj_slow = 90;   aj_slow = 70
 vj_mto =  10;   aj_mto =  5
 vl_fast = 1000; al_fast = 500
-vl_slow = 500;  al_slow = 250
-vl_mto =  100;  al_mto =  50
+vl_slow = 550;  al_slow = 300
+vl_mto =  50;  al_mto =  25
 
 # ---------------------- poses joint auxiliares ------
 # Home general del robot (posición segura de referencia)
@@ -60,7 +60,7 @@ home = posj(-90.00, 0.00, 90.00, 0.00, 90.00, 90.00)
 
 # Posiciones "up" sobre zonas clave (hubs de seguridad):
 # Estas son posturas en joint encima de las zonas principales. Se usan como puntos intermedios seguros.
-up_conv  = posj(-91.09, 19.36, 78.55, 0.00, 82.15, 88.91)   # Hub sobre conveyor
+up_conv  = posj(-100.00, 17.56, 78.28, 0.00, 84.16, 81.00)   # Hub sobre conveyor
 up_left  = posj(4.58, -8.86, 98.00, 0.00, 90.85, 94.58)     # Hub sobre pallet izquierdo
 up_right = posj(-175.42, -8.86, 98.01, 0.00, 90.86, 94.58)  # Hub sobre pallet derecho
 
@@ -68,7 +68,7 @@ up_right = posj(-175.42, -8.86, 98.01, 0.00, 90.86, 94.58)  # Hub sobre pallet d
 # Esta postura busca minimizar riesgo de colisión cuando se mueve el Lift100.
 safe_pose = posj(0.00, 0.00, 0.00, 0.00, 0.00, 90.00)
 
-MAINT_PASSWORD = "1234"   # Contraseña de mantenimiento
+MAINT_PASSWORD = "tes3211"   # Contraseña de mantenimiento
 maint_safe_pose = posj(90.00, 50.00, 115.00, 0, -75.00, 90.00)
 
 # Flag global: indica si se ha entrado en modo mantenimiento
@@ -91,31 +91,27 @@ do_b_blow = 4
 di_vac_ok_a = 1    # DI para "vacío OK mitad A"
 di_vac_ok_b = 2    # DI para "vacío OK mitad B"
 
-# ---------------------- PLC OUTPUT (Robot -> PLC) ----------------------
-# IMPORTANT:
-# - Robot State (%ID344) is mapped to Output INT Register 0
-# - Pick Mode   (%ID348) is mapped to Output INT Register 1
-# - Vacuum State bits are mapped to Output BIT Register 0..1
-#
-# See: "PLC Signal Mapping.txt" for the official mapping.
+# ---------------------- SALIDAS PLC (Robot -> PLC) ----------------------
 
-# Output INT registers
-ROBOT_STATE_REG = 0   # %ID344
-PICK_MODE_REG   = 1   # %ID348
+# Salida INT registers
+ROBOT_STATE_REG = 0   
+VAC_STATUS_REG = 1  
+PICK_MODE_REG   = 2   
 
-# Robot state values (INT)
+VAC_STATUS_IDLE = 0
+VAC_STATUS_OK   = 1
+VAC_STATUS_LOST = 2
+
+# Valores de estado del robot (INT)
 ROBOT_STATE_IDLE        = 0
 ROBOT_STATE_NORMAL      = 1   # palletizing (automatic cycle)
 ROBOT_STATE_STANDBY     = 2   # menus / selections / waiting for operator choice
 ROBOT_STATE_MANUAL      = 3   # manual action (RETIRAR TARIMA)
 ROBOT_STATE_MAINTENANCE = 4   # maintenance mode
 
-# Output BIT registers (Vacuum state)
-VAC_OK_BIT   = 0   # %I38.0 -> VACUUM OK
-VAC_LOST_BIT = 1   # %I38.1 -> VACUUM LOST
-
-# Optional status bit (kept from your script)
-MAINT_BIT = 2       # 1 = robot in maintenance mode (aux bit to PLC)
+# Salida BIT registers 
+STACK_ACK_BIT   = 0   
+MAINT_BIT = 2       
 
 # Funciones de control del gripper (FULL / HALF A / HALF B / RELEASE)
 # Estas funciones encapsulan la lógica de encender/apagar las DO y agregar pequeñas esperas.
@@ -182,7 +178,7 @@ def rel_half_b():
 # =====================================================================
 # Mientras USE_VAC_FEEDBACK = False, el programa ignora estas DI de vacío
 # y asume que siempre se agarra correctamente la pieza.
-USE_VAC_FEEDBACK = False
+USE_VAC_FEEDBACK = True
 
 def _vac_ok_a():
     """
@@ -283,6 +279,14 @@ def calc_tool_weight_by_vacuum_feedback(rtype):
             * B=1 -> half_weight
             * B=0 -> gripper_weight
     """
+    if not USE_VAC_FEEDBACK:
+        # Conservador: sobreestimar payload si no hay feedback
+        if rtype == "full":
+            return "full_weight"
+        if rtype == "half_a" or rtype == "half_b":
+            return "half_weight"
+        return "gripper_weight"
+
     a_ok = _vac_ok_a()
     b_ok = _vac_ok_b()
 
@@ -517,34 +521,30 @@ def lifter_gate_or_stop():
     return True
 
 def lifter_init_is_safe_by_progress():
+    """:
+      - True  => NO hay progreso guardado (Layer/Slot en 0) y se puede hacer init normal.
+      - False => SÍ hay progreso guardado en cualquier lado y el init debe hacerse con
+                la secuencia segura: safe_pose -> init -> re-subir nivel (se maneja en main()).
     """
-    Devuelve False si NO es seguro inicializar el lifter (porque init puede bajar a 0).
-    Regla solicitada:
-        - Si AMBOS lados tienen progreso (cama) > 5, NO permitir init.
-
-    Nota: tus layers son 0-based.
-        - "mayor a 4" en 1-based = capas 5..9
-        - en 0-based eso es layer >= 4
-    """
-    # Si por alguna razón no existen aún, por seguridad permitir
     try:
-        l_ok = (System_Layer_L is not None)
-        r_ok = (System_Layer_R is not None)
-        if not (l_ok and r_ok):
-            return True
+        l_layer = (System_Layer_L if (System_Layer_L is not None) else 0)
+        l_slot  = (System_Slot_L  if (System_Slot_L  is not None) else 0)
+        r_layer = (System_Layer_R if (System_Layer_R is not None) else 0)
+        r_slot  = (System_Slot_R  if (System_Slot_R  is not None) else 0)
 
-        # 0-based: layer >= 4 equivale a cama >= 5 (1-based)
-        if (System_Layer_L >= 4) or (System_Layer_R >= 4):
-            return False
+        progress_exists = (l_layer > 0) or (l_slot > 0) or (r_layer > 0) or (r_slot > 0)
 
-        return True
+        # True = "safe en init normal" (sin progreso). False = "requiere secuencia safe_pose".
+        return (not progress_exists)
     except:
+        # Si algo está raro, por seguridad dejamos que el flujo normal continúe
         return True
+
 
 def lifter_wait_ready(timeout=15.0):
     """
     Espera a que el Lift100 termine cualquier movimiento (isBusy == False).
-    Usa un timeout para evitar bucles infinitos.
+    Devuelve True si quedó listo, False si hizo timeout.
     """
     t = 0.0
     while or_lift.isBusy():
@@ -552,7 +552,8 @@ def lifter_wait_ready(timeout=15.0):
         t = t + 0.1
         if t >= timeout:
             tp_log("TIMEOUT esperando a que el Lift100 termine el movimiento.")
-            break
+            return False
+    return True
 
 def lifter_check_error():
     """
@@ -585,8 +586,16 @@ def lifter_check_position(level, tol=5.0):
 def lifter_safe_init():
     """
     Verifica conexión e inicialización del Lift100.
-    Si no está inicializado, ejecuta or_lift.init() y espera a que termine.
-    NO toca frames ni niveles, sólo deja el Lift100 referenciado.
+
+    REGLA (según requisito actual):
+    - Esta función NO inicializa el lifter.
+    - La inicialización segura (safe_pose -> init -> re-subir nivel -> home)
+      se maneja EXCLUSIVAMENTE en main().
+
+    Comportamiento:
+    - Si no está conectado: log y return
+    - Si ya está init: log y return
+    - Si no está init: log y return (main() lo resolverá)
     """
     if not or_lift.isconn():
         tp_log("ERROR: Lift100 no conectado (or_lift.isconn() == False).")
@@ -596,76 +605,58 @@ def lifter_safe_init():
         tp_log("Lift100 ya está inicializado.")
         return
 
-    # --- GUARD: evitar init si puede aplastar tarimas ---
-    if not lifter_init_is_safe_by_progress():
-        # No es seguro inicializar porque init puede bajar a 0.
-        # El manejo seguro (mover a safe_pose, init, re-subir nivel, home) se hace en main().
-        tp_log("Init Lift100 BLOQUEADO aquí: progreso alto en ambos lados (se maneja con secuencia safe_pose en main).")
-        return
+    # Caso: lifter NO inicializado
+    tp_log(
+        "Lift100 NO está inicializado. "
+        "La inicialización segura se ejecuta en main() "
+        "(safe_pose -> init -> re-subir nivel -> home)."
+    )
+    return
 
-    tp_log("Inicializando Lift100...")
-    or_lift.init()
-    lifter_wait_ready()
-
-    if not or_lift.isInit():
-        tp_log("ADVERTENCIA: or_lift.isInit() sigue en False después de init().")
-    else:
-        tp_log("Lift100 inicializado correctamente.")
 
 # ---------------------- frames + nivel lifter ------------------------
 
 def _lifter_do_set_level(level):
     """
     Ajusta el Lift100 al nivel indicado usando or_lift.move().
-    Niveles permitidos:
-        0 -> ~0 mm
-        1 -> ~400 mm
-        2 -> ~670 mm
-    Incluye:
-        - Verificación de conexión.
-        - Inicialización segura si aún no está init.
-        - Espera a que termine el movimiento (isBusy).
-        - Chequeo de error y de posición final.
+    Devuelve True si el nivel quedó OK, False si falló.
     """
-    # Asegurar conexión e init
-    lifter_safe_init()
     if not or_lift.isconn():
         tp_log("No se puede mover Lift100: sin conexión.")
-        return
+        return False
 
-    # Validar nivel
+    if not or_lift.isInit():
+        tp_log("No se puede mover Lift100: no está inicializado (init se hace en main).")
+        return False
+
     if not (level == 0 or level == 1 or level == 2):
-        tp_log("Nivel Lift100 inválido: " + str(level) +
-                ". Re-inicializando a posición 0.")
-        or_lift.init()
-        lifter_wait_ready()
-        lifter_check_error()
-        return
+        tp_log("Nivel Lift100 inválido: " + str(level) + ". No se mueve Lift100.")
+        return False
 
-    # Calcular posición objetivo en mm
     tgt = lifter_target_pos_for_level(level)
 
-    # Si ya está dentro de tolerancia y no está ocupado, no mover
     cur = or_lift.get_pos()
     if abs(cur - tgt) < 2.0 and (not or_lift.isBusy()):
-        tp_log("Lift100 ya en nivel " + str(level) +
-                " (pos=" + str(cur) + " mm).")
-        return
+        tp_log("Lift100 ya en nivel " + str(level) + " (pos=" + str(cur) + " mm).")
+        return True
 
-    tp_log("Moviendo Lift100 a nivel " + str(level) +
-            " (" + str(tgt) + " mm).")
+    tp_log("Moviendo Lift100 a nivel " + str(level) + " (" + str(tgt) + " mm).")
+    or_lift.move(tgt, 30.0)
 
-    # Movimiento con velocidad razonable dentro del rango 10–100 mm/s
-    or_lift.move(tgt, 80.0)
+    if not lifter_wait_ready():
+        tp_log("ERROR: Lift100 no terminó movimiento (timeout).")
+        return False
 
-    # Esperar a que termine
-    lifter_wait_ready()
+    err = lifter_check_error()
+    if not (err == 0):
+        tp_log("ERROR: Lift100 reporta error tras move().")
+        return False
 
-    # Revisar si hay errores
-    lifter_check_error()
+    if not lifter_check_position(level):
+        tp_log("ERROR: Lift100 no llegó a la posición objetivo (fuera de tolerancia).")
+        return False
 
-    # Verificar posición final
-    lifter_check_position(level)
+    return True
 
 def apply_level_to_frames(level):
     """
@@ -726,7 +717,12 @@ def lifter_set_level(side, level):
             " (offset Z = " + str(_level_offset(level)) + " mm).")
 
     # Mover físicamente el lifter
-    _lifter_do_set_level(level)
+    ok = _lifter_do_set_level(level)
+    if not ok:
+        tp_popup("ERROR LIFTER: Fallo moviendo a nivel " + str(level) + ".\nPrograma detenido.", DR_PM_ALARM)
+        stop(DR_QSTOP)
+        return
+
 
     # Ajustar frames de trabajo en función de los frames originales
     apply_level_to_frames(level)
@@ -745,7 +741,12 @@ def lifter_restore_frames():
     global _lifter_level
 
     # Mover lifter físicamente a nivel 0
-    _lifter_do_set_level(0)
+    ok = _lifter_do_set_level(0)
+    if not ok:
+        tp_popup("ERROR LIFTER: No se pudo restaurar a nivel 0.\nPrograma detenido.", DR_PM_ALARM)
+        stop(DR_QSTOP)
+        return
+
 
     # Aplicar compensación de nivel 0 (sin desplazamiento en Z)
     apply_level_to_frames(0)
@@ -766,222 +767,222 @@ def lifter_restore_frames():
 left_layers = [
     # LAYER 1 (Left)
     [
-        (105.0, 402.0, 235.0, -180.0, 0.0,  90.0),
-        (588.0,  90.0, 235.0, -180.0, 0.0, -180.0),
-        (588.0, 265.0, 235.0, -180.0, 0.0, -180.0),
-        (588.0, 440.0, 235.0, -180.0, 0.0, -180.0),
-        (588.0, 615.0, 235.0, -180.0, 0.0, -180.0),
-        (588.0, 790.0, 235.0, -180.0, 0.0, -180.0),
-        (588.0, 965.0, 235.0, -180.0, 0.0, -180.0),
-        (588.0,1140.0, 235.0, -180.0, 0.0, -180.0),
-        (105.0, 1197.0, 235.0, -180.0, 0.0,  90.0)
+        (105.0, 432.0, 235.0, -180.0, 0.0, 90.0),
+        (588.0, 115.0, 235.0, -180.0, 0.0, -180.0),
+        (588.0, 290.0, 235.0, -180.0, 0.0, -180.0),
+        (588.0, 465.0, 235.0, -180.0, 0.0, -180.0),
+        (588.0, 640.0, 235.0, -180.0, 0.0, -180.0),
+        (588.0, 815.0, 235.0, -180.0, 0.0, -180.0),
+        (588.0, 990.0, 235.0, -180.0, 0.0, -180.0),
+        (588.0, 1165.0, 235.0, -180.0, 0.0, -180.0),
+        (105.0, 1243.0, 235.0, -180.0, 0.0, 90.0)
     ],
     # LAYER 2 (Left)
     [
-        (900.0, 812.0, 365.0, -180.0, 0.0,  90.0),
-        (900.0, 407.0, 365.0, -180.0, 0.0,  90.0),
-        (418.0,  90.0, 365.0, -180.0, 0.0, -180.0),
-        (418.0, 265.0, 365.0, -180.0, 0.0, -180.0),
-        (418.0, 440.0, 365.0, -180.0, 0.0, -180.0),
-        (418.0, 615.0, 365.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0, 365.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0, 365.0, -180.0, 0.0, -180.0),
-        (418.0,1140.0, 365.0, -180.0, 0.0, -180.0)
+        (900.0, 853.0, 365.0, -180.0, 0.0,  90.0),
+        (900.0, 437.0, 365.0, -180.0, 0.0,  90.0),
+        (425.0, 115.0, 365.0, -180.0, 0.0, -180.0),
+        (425.0, 290.0, 365.0, -180.0, 0.0, -180.0),
+        (425.0, 465.0, 365.0, -180.0, 0.0, -180.0),
+        (425.0, 640.0, 365.0, -180.0, 0.0, -180.0),
+        (425.0, 815.0, 365.0, -180.0, 0.0, -180.0),
+        (425.0, 990.0, 365.0, -180.0, 0.0, -180.0),
+        (425.0, 1165.0, 365.0, -180.0, 0.0, -180.0)
     ],
     # LAYER 3 (Left)
     [
-        (105.0, 402.0, 495.0, -180.0, 0.0,  90.0),
-        (588.0,  90.0, 495.0, -180.0, 0.0, -180.0),
-        (588.0, 265.0, 495.0, -180.0, 0.0, -180.0),
-        (588.0, 440.0, 495.0, -180.0, 0.0, -180.0),
-        (588.0, 615.0, 495.0, -180.0, 0.0, -180.0),
-        (588.0, 790.0, 495.0, -180.0, 0.0, -180.0),
-        (588.0, 965.0, 495.0, -180.0, 0.0, -180.0),
-        (588.0,1140.0, 495.0, -180.0, 0.0, -180.0),
-        (105.0,1197.0, 495.0, -180.0, 0.0,  90.0)
+        (105.0, 432.0, 495.0, -180.0, 0.0,  90.0),
+        (588.0, 115.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0, 290.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0, 465.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0, 640.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0, 815.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0, 990.0, 495.0, -180.0, 0.0, -180.0),
+        (588.0, 1165.0, 495.0, -180.0, 0.0, -180.0),
+        (105.0, 1243.0, 495.0, -180.0, 0.0,  90.0)
     ],
     # LAYER 4 (Left)
     [
-        (900.0, 812.0, 625.0, -180.0, 0.0,  90.0),
-        (900.0, 407.0, 625.0, -180.0, 0.0,  90.0),
-        (418.0,  90.0, 625.0, -180.0, 0.0, -180.0),
-        (418.0, 265.0, 625.0, -180.0, 0.0, -180.0),
-        (418.0, 440.0, 625.0, -180.0, 0.0, -180.0),
-        (418.0, 615.0, 625.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0, 625.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0, 625.0, -180.0, 0.0, -180.0),
-        (418.0,1140.0, 625.0, -180.0, 0.0, -180.0)
+        (900.0, 853.0, 625.0, -180.0, 0.0,  90.0),
+        (900.0, 437.0, 625.0, -180.0, 0.0,  90.0),
+        (425.0, 115.0, 625.0, -180.0, 0.0, -180.0),
+        (425.0, 290.0, 625.0, -180.0, 0.0, -180.0),
+        (425.0, 465.0, 625.0, -180.0, 0.0, -180.0),
+        (425.0, 640.0, 625.0, -180.0, 0.0, -180.0),
+        (425.0, 815.0, 625.0, -180.0, 0.0, -180.0),
+        (425.0, 990.0, 625.0, -180.0, 0.0, -180.0),
+        (425.0, 1165.0, 625.0, -180.0, 0.0, -180.0)
     ],
     # LAYER 5 (Left)
     [
-        (105.0, 402.0, 755.0, -180.0, 0.0,  90.0),
-        (588.0,  90.0, 755.0, -180.0, 0.0, -180.0),
-        (588.0, 265.0, 755.0, -180.0, 0.0, -180.0),
-        (588.0, 440.0, 755.0, -180.0, 0.0, -180.0),
-        (588.0, 615.0, 755.0, -180.0, 0.0, -180.0),
-        (588.0, 790.0, 755.0, -180.0, 0.0, -180.0),
-        (588.0, 965.0, 755.0, -180.0, 0.0, -180.0),
-        (588.0,1140.0, 755.0, -180.0, 0.0, -180.0),
-        (105.0,1197.0, 755.0, -180.0, 0.0,  90.0)
+        (105.0, 432.0, 735.0, -180.0, 0.0,  90.0),
+        (588.0, 115.0, 735.0, -180.0, 0.0, -180.0),
+        (588.0, 290.0, 735.0, -180.0, 0.0, -180.0),
+        (588.0, 465.0, 735.0, -180.0, 0.0, -180.0),
+        (588.0, 640.0, 735.0, -180.0, 0.0, -180.0),
+        (588.0, 815.0, 735.0, -180.0, 0.0, -180.0),
+        (588.0, 990.0, 735.0, -180.0, 0.0, -180.0),
+        (588.0, 1165.0, 735.0, -180.0, 0.0, -180.0),
+        (105.0, 1243.0, 735.0, -180.0, 0.0,  90.0)
     ],
     # LAYER 6 (Left)
     [
-        (900.0, 812.0, 885.0, -180.0, 0.0,  90.0),
-        (900.0, 407.0, 885.0, -180.0, 0.0,  90.0),
-        (418.0,  90.0, 885.0, -180.0, 0.0, -180.0),
-        (418.0, 265.0, 885.0, -180.0, 0.0, -180.0),
-        (418.0, 440.0, 885.0, -180.0, 0.0, -180.0),
-        (418.0, 615.0, 885.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0, 885.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0, 885.0, -180.0, 0.0, -180.0),
-        (418.0,1140.0, 885.0, -180.0, 0.0, -180.0)
+        (900.0, 853.0, 865.0, -180.0, 0.0,  90.0),
+        (900.0, 437.0, 865.0, -180.0, 0.0,  90.0),
+        (425.0, 115.0, 865.0, -180.0, 0.0, -180.0),
+        (425.0, 290.0, 865.0, -180.0, 0.0, -180.0),
+        (425.0, 465.0, 865.0, -180.0, 0.0, -180.0),
+        (425.0, 640.0, 865.0, -180.0, 0.0, -180.0),
+        (425.0, 815.0, 865.0, -180.0, 0.0, -180.0),
+        (425.0, 990.0, 865.0, -180.0, 0.0, -180.0),
+        (425.0, 1165.0, 865.0, -180.0, 0.0, -180.0)
     ],
     # LAYER 7 (Left)
     [
-        (105.0, 402.0, 1015.0, -180.0, 0.0,  90.0),
-        (588.0,  90.0, 1015.0, -180.0, 0.0, -180.0),
-        (588.0, 265.0, 1015.0, -180.0, 0.0, -180.0),
-        (588.0, 440.0, 1015.0, -180.0, 0.0, -180.0),
-        (588.0, 615.0, 1015.0, -180.0, 0.0, -180.0),
-        (588.0, 790.0, 1015.0, -180.0, 0.0, -180.0),
-        (588.0, 965.0, 1015.0, -180.0, 0.0, -180.0),
-        (588.0,1140.0, 1015.0, -180.0, 0.0, -180.0),
-        (105.0,1197.0, 1015.0, -180.0, 0.0,  90.0)
+        (105.0, 432.0, 995.0, -180.0, 0.0,  90.0),
+        (588.0, 115.0, 995.0, -180.0, 0.0, -180.0),
+        (588.0, 290.0, 995.0, -180.0, 0.0, -180.0),
+        (588.0, 465.0, 995.0, -180.0, 0.0, -180.0),
+        (588.0, 640.0, 995.0, -180.0, 0.0, -180.0),
+        (588.0, 815.0, 995.0, -180.0, 0.0, -180.0),
+        (588.0, 990.0, 995.0, -180.0, 0.0, -180.0),
+        (588.0, 1165.0, 995.0, -180.0, 0.0, -180.0),
+        (105.0, 1243.0, 995.0, -180.0, 0.0,  90.0)
     ],
     # LAYER 8 (Left)
     [
-        (900.0, 812.0, 1145.0, -180.0, 0.0,  90.0),
-        (900.0, 407.0, 1145.0, -180.0, 0.0,  90.0),
-        (418.0,  90.0, 1145.0, -180.0, 0.0, -180.0),
-        (418.0, 265.0, 1145.0, -180.0, 0.0, -180.0),
-        (418.0, 440.0, 1145.0, -180.0, 0.0, -180.0),
-        (418.0, 615.0, 1145.0, -180.0, 0.0, -180.0),
-        (418.0, 790.0, 1145.0, -180.0, 0.0, -180.0),
-        (418.0, 965.0, 1145.0, -180.0, 0.0, -180.0),
-        (418.0,1140.0, 1145.0, -180.0, 0.0, -180.0)
+        (900.0, 853.0, 1115.0, -180.0, 0.0,  90.0),
+        (900.0, 437.0, 1115.0, -180.0, 0.0,  90.0),
+        (425.0, 115.0, 1115.0, -180.0, 0.0, -180.0),
+        (425.0, 290.0, 1115.0, -180.0, 0.0, -180.0),
+        (425.0, 465.0, 1115.0, -180.0, 0.0, -180.0),
+        (425.0, 640.0, 1115.0, -180.0, 0.0, -180.0),
+        (425.0, 815.0, 1115.0, -180.0, 0.0, -180.0),
+        (425.0, 990.0, 1115.0, -180.0, 0.0, -180.0),
+        (425.0, 1165.0, 1115.0, -180.0, 0.0, -180.0)
     ],
     # LAYER 9 (Left)
     [
-        (105.0, 402.0,1275.0, -180.0, 0.0,  90.0),
-        (588.0,  90.0,1275.0, -180.0, 0.0, -180.0),
-        (588.0, 265.0,1275.0, -180.0, 0.0, -180.0),
-        (588.0, 440.0,1275.0, -180.0, 0.0, -180.0),
-        (588.0, 615.0,1275.0, -180.0, 0.0, -180.0),
-        (588.0, 790.0,1275.0, -180.0, 0.0, -180.0),
-        (588.0, 965.0,1275.0, -180.0, 0.0, -180.0),
-        (588.0,1140.0,1275.0, -180.0, 0.0, -180.0),
-        (105.0,1197.0,1275.0, -180.0, 0.0,  90.0)
+        (105.0, 432.0, 1245.0, -180.0, 0.0,  90.0),
+        (588.0, 115.0, 1245.0, -180.0, 0.0, -180.0),
+        (588.0, 290.0, 1245.0, -180.0, 0.0, -180.0),
+        (588.0, 465.0, 1245.0, -180.0, 0.0, -180.0),
+        (588.0, 640.0, 1245.0, -180.0, 0.0, -180.0),
+        (588.0, 815.0, 1245.0, -180.0, 0.0, -180.0),
+        (588.0, 990.0, 1245.0, -180.0, 0.0, -180.0),
+        (588.0, 1165.0, 1245.0, -180.0, 0.0, -180.0),
+        (105.0, 1243.0, 1245.0, -180.0, 0.0,  -90.0)
     ]
 ]
 
 right_layers = [
     # LAYER 1 (Right)
     [
-        (915.0, 402.0, 235.0, -180.0, 0.0, -90.0),
-        (432.0,  85.0, 235.0, -180.0, 0.0,   0.0),
-        (432.0, 260.0, 235.0, -180.0, 0.0,   0.0),
-        (432.0, 435.0, 235.0, -180.0, 0.0,   0.0),
-        (432.0, 610.0, 235.0, -180.0, 0.0,   0.0),
-        (432.0, 785.0, 235.0, -180.0, 0.0,   0.0),
-        (432.0, 960.0, 235.0, -180.0, 0.0,   0.0),
-        (432.0,1135.0, 235.0, -180.0, 0.0,   0.0),
-        (915.0,1203.0, 235.0, -180.0, 0.0, -90.0)
+        (915.0, 432.0, 235.0, -180.0, 0.0, -90.0),
+        (432.0, 115.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0, 290.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0, 465.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0, 640.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0, 815.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0, 990.0, 235.0, -180.0, 0.0,   0.0),
+        (432.0, 1165.0, 235.0, -180.0, 0.0,   0.0),
+        (915.0, 1243.0, 235.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 2 (Right)
     [
-        (115.0, 808.0, 365.0, -180.0, 0.0, -90.0),
-        (115.0, 402.0, 365.0, -180.0, 0.0, -90.0),
-        (603.0,  80.0, 365.0, -180.0, 0.0,   0.0),
-        (603.0, 255.0, 365.0, -180.0, 0.0,   0.0),
-        (603.0, 430.0, 365.0, -180.0, 0.0,   0.0),
-        (603.0, 605.0, 365.0, -180.0, 0.0,   0.0),
-        (603.0, 780.0, 365.0, -180.0, 0.0,   0.0),
-        (603.0, 955.0, 365.0, -180.0, 0.0,   0.0),
-        (603.0,1130.0, 365.0, -180.0, 0.0,   0.0)
+        (140.0, 853.0, 365.0, -180.0, 0.0, -90.0),
+        (140.0, 437.0, 365.0, -180.0, 0.0, -90.0),
+        (608.0, 115.0, 365.0, -180.0, 0.0,   0.0),
+        (608.0, 290.0, 365.0, -180.0, 0.0,   0.0),
+        (608.0, 465.0, 365.0, -180.0, 0.0,   0.0),
+        (608.0, 640.0, 365.0, -180.0, 0.0,   0.0),
+        (608.0, 815.0, 365.0, -180.0, 0.0,   0.0),
+        (608.0, 990.0, 365.0, -180.0, 0.0,   0.0),
+        (608.0, 1165.0, 365.0, -180.0, 0.0,   0.0)
     ],
     # LAYER 3 (Right)
     [
-        (915.0, 402.0, 495.0, -180.0, 0.0, -90.0),
-        (432.0,  85.0, 495.0, -180.0, 0.0,   0.0),
-        (432.0, 260.0, 495.0, -180.0, 0.0,   0.0),
-        (432.0, 435.0, 495.0, -180.0, 0.0,   0.0),
-        (432.0, 610.0, 495.0, -180.0, 0.0,   0.0),
-        (432.0, 785.0, 495.0, -180.0, 0.0,   0.0),
-        (432.0, 960.0, 495.0, -180.0, 0.0,   0.0),
-        (432.0,1135.0, 495.0, -180.0, 0.0,   0.0),
-        (915.0,1203.0, 495.0, -180.0, 0.0, -90.0)
+        (915.0, 432.0, 495.0, -180.0, 0.0, -90.0),
+        (432.0, 115.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0, 290.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0, 465.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0, 640.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0, 815.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0, 990.0, 495.0, -180.0, 0.0,   0.0),
+        (432.0, 1165.0, 495.0, -180.0, 0.0,   0.0),
+        (915.0, 1243.0, 495.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 4 (Right)
     [
-        (115.0, 808.0, 625.0, -180.0, 0.0, -90.0),
-        (115.0, 402.0, 625.0, -180.0, 0.0, -90.0),
-        (603.0,  80.0, 625.0, -180.0, 0.0,   0.0),
-        (603.0, 255.0, 625.0, -180.0, 0.0,   0.0),
-        (603.0, 430.0, 625.0, -180.0, 0.0,   0.0),
-        (603.0, 605.0, 625.0, -180.0, 0.0,   0.0),
-        (603.0, 780.0, 625.0, -180.0, 0.0,   0.0),
-        (603.0, 955.0, 625.0, -180.0, 0.0,   0.0),
-        (603.0,1130.0, 625.0, -180.0, 0.0,   0.0)
+        (140.0, 853.0, 625.0, -180.0, 0.0, -90.0),
+        (140.0, 437.0, 625.0, -180.0, 0.0, -90.0),
+        (608.0, 115.0, 625.0, -180.0, 0.0,   0.0),
+        (608.0, 290.0, 625.0, -180.0, 0.0,   0.0),
+        (608.0, 465.0, 625.0, -180.0, 0.0,   0.0),
+        (608.0, 640.0, 625.0, -180.0, 0.0,   0.0),
+        (608.0, 815.0, 625.0, -180.0, 0.0,   0.0),
+        (608.0, 990.0, 625.0, -180.0, 0.0,   0.0),
+        (608.0, 1165.0, 625.0, -180.0, 0.0,   0.0)
     ],
     # LAYER 5 (Right)
     [
-        (915.0, 402.0, 755.0, -180.0, 0.0, -90.0),
-        (432.0, 85.0, 755.0, -180.0, 0.0, 0.0),
-        (432.0, 260.0, 755.0, -180.0, 0.0, 0.0),
-        (432.0, 435.0, 755.0, -180.0, 0.0, 0.0),
-        (432.0, 610.0, 755.0, -180.0, 0.0, 0.0),
-        (432.0, 785.0, 755.0, -180.0, 0.0, 0.0),
-        (432.0, 960.0, 755.0, -180.0, 0.0, 0.0),
-        (432.0, 1135.0, 755.0, -180.0, 0.0, 0.0),
-        (915.0, 1203.0, 755.0, -180.0, 0.0, -90.0)
+        (915.0, 432.0, 735.0, -180.0, 0.0, -90.0),
+        (432.0, 115.0, 735.0, -180.0, 0.0, 0.0),
+        (432.0, 290.0, 735.0, -180.0, 0.0, 0.0),
+        (432.0, 465.0, 735.0, -180.0, 0.0, 0.0),
+        (432.0, 640.0, 735.0, -180.0, 0.0, 0.0),
+        (432.0, 815.0, 735.0, -180.0, 0.0, 0.0),
+        (432.0, 990.0, 735.0, -180.0, 0.0, 0.0),
+        (432.0, 1165.0, 735.0, -180.0, 0.0, 0.0),
+        (915.0, 1243.0, 735.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 6 (Right)
     [
-        (115.0, 808.0, 885.0, -180.0, 0.0, -90.0),
-        (115.0, 402.0, 885.0, -180.0, 0.0, -90.0),
-        (603.0, 80.0, 885.0, -180.0, 0.0, 0.0),
-        (603.0, 255.0, 885.0, -180.0, 0.0, 0.0),
-        (603.0, 430.0, 885.0, -180.0, 0.0, 0.0),
-        (603.0, 605.0, 885.0, -180.0, 0.0, 0.0),
-        (603.0, 780.0, 885.0, -180.0, 0.0, 0.0),
-        (603.0, 955.0, 885.0, -180.0, 0.0, 0.0),
-        (603.0, 1130.0, 885.0, -180.0, 0.0, 0.0)
+        (140.0, 853.0, 865.0, -180.0, 0.0, -90.0),
+        (140.0, 437.0, 865.0, -180.0, 0.0, -90.0),
+        (608.0, 115.0, 865.0, -180.0, 0.0, 0.0),
+        (608.0, 290.0, 865.0, -180.0, 0.0, 0.0),
+        (608.0, 465.0, 865.0, -180.0, 0.0, 0.0),
+        (608.0, 640.0, 865.0, -180.0, 0.0, 0.0),
+        (608.0, 815.0, 865.0, -180.0, 0.0, 0.0),
+        (608.0, 990.0, 865.0, -180.0, 0.0, 0.0),
+        (608.0, 1165.0, 865.0, -180.0, 0.0, 0.0)
     ],
     # LAYER 7 (Right)
     [
-        (915.0, 402.0, 1015.0, -180.0, 0.0, -90.0),
-        (432.0, 85.0, 1015.0, -180.0, 0.0, 0.0),
-        (432.0, 260.0, 1015.0, -180.0, 0.0, 0.0),
-        (432.0, 435.0, 1015.0, -180.0, 0.0, 0.0),
-        (432.0, 610.0, 1015.0, -180.0, 0.0, 0.0),
-        (432.0, 785.0, 1015.0, -180.0, 0.0, 0.0),
-        (432.0, 960.0, 1015.0, -180.0, 0.0, 0.0),
-        (432.0, 1135.0, 1015.0, -180.0, 0.0, 0.0),
-        (915.0, 1203.0, 1015.0, -180.0, 0.0, -90.0)
+        (915.0, 432.0, 995.0, -180.0, 0.0, -90.0),
+        (432.0, 115.0, 995.0, -180.0, 0.0, 0.0),
+        (432.0, 290.0, 995.0, -180.0, 0.0, 0.0),
+        (432.0, 465.0, 995.0, -180.0, 0.0, 0.0),
+        (432.0, 640.0, 995.0, -180.0, 0.0, 0.0),
+        (432.0, 815.0, 995.0, -180.0, 0.0, 0.0),
+        (432.0, 990.0, 995.0, -180.0, 0.0, 0.0),
+        (432.0, 1165.0, 995.0, -180.0, 0.0, 0.0),
+        (915.0, 1243.0, 995.0, -180.0, 0.0, -90.0)
     ],
     # LAYER 8 (Right)
     [
-        (115.0, 808.0, 1145.0, -180.0, 0.0, -90.0),
-        (115.0, 402.0, 1145.0, -180.0, 0.0, -90.0),
-        (603.0, 80.0, 1145.0, -180.0, 0.0, 0.0 ),
-        (603.0, 255.0, 1145.0, -180.0, 0.0, 0.0),
-        (603.0, 430.0, 1145.0, -180.0, 0.0, 0.0),
-        (603.0, 605.0, 1145.0, -180.0, 0.0, 0.0),
-        (603.0, 780.0, 1145.0, -180.0, 0.0, 0.0),
-        (603.0, 955.0, 1145.0, -180.0, 0.0, 0.0),
-        (603.0, 1130.0, 1145.0, -180.0, 0.0, 0.0)
+        (140.0, 853.0, 1115.0, -180.0, 0.0, -90.0),
+        (140.0, 437.0, 1115.0, -180.0, 0.0, -90.0),
+        (608.0, 115.0, 1115.0, -180.0, 0.0, 0.0 ),
+        (608.0, 290.0, 1115.0, -180.0, 0.0, 0.0),
+        (608.0, 465.0, 1115.0, -180.0, 0.0, 0.0),
+        (608.0, 640.0, 1115.0, -180.0, 0.0, 0.0),
+        (608.0, 815.0, 1115.0, -180.0, 0.0, 0.0),
+        (608.0, 990.0, 1115.0, -180.0, 0.0, 0.0),
+        (608.0, 1165.0, 1115.0, -180.0, 0.0, 0.0)
     ],
     # LAYER 9 (Right)
     [
-        (915.0, 402.0, 1275.0, -180.0, 0.0, -90.0),
-        (432.0, 85.0, 1275.0, -180.0, 0.0, 0.0),
-        (432.0, 260.0, 1275.0, -180.0, 0.0, 0.0),
-        (432.0, 435.0, 1275.0, -180.0, 0.0, 0.0),
-        (432.0, 610.0, 1275.0, -180.0, 0.0, 0.0),
-        (432.0, 785.0, 1275.0, -180.0, 0.0, 0.0),
-        (432.0, 960.0, 1275.0, -180.0, 0.0, 0.0),
-        (432.0, 1135.0, 1275.0, -180.0, 0.0, 0.0),
-        (915.0, 1203.0, 1275.0, -180.0, 0.0, -90.0)
+        (915.0, 432.0, 1245.0, -180.0, 0.0, -90.0),
+        (432.0, 115.0, 1245.0, -180.0, 0.0, 0.0),
+        (432.0, 290.0, 1245.0, -180.0, 0.0, 0.0),
+        (432.0, 465.0, 1245.0, -180.0, 0.0, 0.0),
+        (432.0, 640.0, 1245.0, -180.0, 0.0, 0.0),
+        (432.0, 815.0, 1245.0, -180.0, 0.0, 0.0),
+        (432.0, 990.0, 1245.0, -180.0, 0.0, 0.0),
+        (432.0, 1165.0, 1245.0, -180.0, 0.0, 0.0),
+        (915.0, 1243.0, 1245.0, -180.0, 0.0, -90.0)
     ]
 ]
 
@@ -1082,7 +1083,7 @@ def _approach_offset(side, layer, slot):
     if side == "L":
         if cama % 2 == 1:   # camas 1,3,5,7,9
             if pos == 9:
-                return (0.0, 50.0)      # slot final -> offset Y
+                return (-50.0, 50.0)      # slot final -> offset Y
             else:
                 return (50.0, 50.0)      # slots 1..8 -> offset X
         else:
@@ -1098,7 +1099,7 @@ def _approach_offset(side, layer, slot):
     if side == "R":
         if cama % 2 == 1:   # camas 1,3,5,7,9
             if pos == 9:
-                return (0.0, 50.0)
+                return (50.0, 50.0)
             else:
                 return (-50.0, 50.0)
         else:
@@ -1203,7 +1204,7 @@ def get_mid(side, layer, slot):
 # =====================================================================
 
 # Pose cartesiana del pick en el conveyor (en conv_frame)
-pick_pose = posx(243.491, -194.909, 845.643, 180.00, 0.00, 0.0, rot_mode)
+pick_pose = posx(107.594, -358.00, 875.00, 180.00, 0.50, -1.0, rot_mode)
 
 def get_pick():
     """
@@ -1237,29 +1238,16 @@ def plc_set_robot_state(state_int):
     tp_log("PLC estado_robot = " + str(state_int))
     set_output_register_int(ROBOT_STATE_REG, state_int)
 
-def plc_force_robot_state(state_int):
-    """Fuerza la publicación del estado al PLC ignorando el 'lock' de mantenimiento.
-
-    Usar SOLO para movimientos controlados como Home seguro, donde queremos que el PLC
-    vea que el robot está en movimiento (NORMAL), y al final regresar a MANTENIMIENTO.
-    """
-    tp_log("PLC robot_state (FORZADO) = " + str(state_int))
-    set_output_register_int(ROBOT_STATE_REG, state_int)
 
 def plc_vacuum_idle():
-    """Clear vacuum status bits (no vacuum expected)."""
-    set_output_register_bit(VAC_OK_BIT, 0)
-    set_output_register_bit(VAC_LOST_BIT, 0)
+    """ACK del compilador en IDLE (0): no se ha tomado el stack / reset."""
+    set_output_register_bit(STACK_ACK_BIT, 0)
+
 
 def plc_vacuum_ok():
-    """VACUUM OK (mutually exclusive with VACUUM LOST)."""
-    set_output_register_bit(VAC_OK_BIT, 1)
-    set_output_register_bit(VAC_LOST_BIT, 0)
+    """ACK del compilador en OK (1): el robot ya tomó el stack y el PLC puede seguir compilando."""
+    set_output_register_bit(STACK_ACK_BIT, 1)
 
-def plc_vacuum_lost():
-    """VACUUM LOST (mutually exclusive with VACUUM OK)."""
-    set_output_register_bit(VAC_OK_BIT, 0)
-    set_output_register_bit(VAC_LOST_BIT, 1)
 
 def plc_enter_maintenance():
     """Force PLC outputs to MAINTENANCE and clear other transient states.
@@ -1276,7 +1264,9 @@ def plc_enter_maintenance():
     plc_set_robot_state(ROBOT_STATE_MAINTENANCE)
     plc_set_maintenance_state(True)
     plc_vacuum_idle()
+    set_output_register_int(VAC_STATUS_REG, VAC_STATUS_IDLE)
     plc_set_pick_mode("idle")
+    set_output_register_int(VAC_STATUS_REG, VAC_STATUS_IDLE)
 
 def plc_exit_maintenance():
     """Clear maintenance latch (allows other states again)."""
@@ -1286,6 +1276,7 @@ def plc_exit_maintenance():
     plc_set_maintenance_state(False)
     plc_vacuum_idle()
     plc_set_pick_mode("idle")
+    set_output_register_int(VAC_STATUS_REG, VAC_STATUS_IDLE)
 def plc_set_pick_mode(mode):
     """Envía al PLC el modo de pick como un entero.
 
@@ -1307,29 +1298,28 @@ def plc_set_pick_mode(mode):
     tp_log("PLC pick_mode_cmd = " + str(val) + " (modo=" + str(mode) + ")")
     set_output_register_int(PICK_MODE_REG, val)
 
-def plc_set_pick_vac_ok(ok_flag):
-    """Backward-compatible helper.
-    True  -> VACUUM OK bit ON, VACUUM LOST bit OFF
-    False -> both bits OFF (idle)
-    """
+
+def plc_set_vac_status(vac_status_int):
+    global _in_maintenance
+    if _in_maintenance:
+        # En mantenimiento no permitir que se borre/actualice el estado de vacío desde lógica normal
+        return
+    set_output_register_int(VAC_STATUS_REG, vac_status_int)
+
+
+def plc_set_stack_ack(ok_flag):
+    global _in_maintenance
+    if _in_maintenance and ok_flag:
+        # En mantenimiento no permitir ACK=OK
+        return
+
     if ok_flag:
-        tp_log("PLC vacuum_state = OK")
+        tp_log("PLC stack_ack = ON")
         plc_vacuum_ok()
     else:
-        tp_log("PLC vacuum_state = IDLE")
+        tp_log("PLC stack_ack = OFF")
         plc_vacuum_idle()
 
-def plc_set_vacuum_loss(flag):
-    """Backward-compatible helper.
-    True  -> VACUUM LOST bit ON, VACUUM OK bit OFF
-    False -> VACUUM LOST bit OFF (idle)
-    """
-    if flag:
-        tp_log("PLC vacuum_state = LOST")
-        plc_vacuum_lost()
-    else:
-        tp_log("PLC vacuum_state = IDLE")
-        plc_vacuum_idle()
 
 def plc_set_maintenance_state(is_on):
     """Publish maintenance flag bit to the PLC (aux bit)."""
@@ -1351,34 +1341,36 @@ def do_pick(mode):
 
     Devuelve True si hubo vacío OK, False si se entra a modo mantenimiento.
     """
-    # Avisar cómo se pretende hacer el pick (full / half_b)
+
     plc_set_pick_mode(mode)
-    # Por defecto, asumimos que NO hay vacio valido hasta que se compruebe
-    plc_set_pick_vac_ok(False)
+    plc_set_stack_ack(False)
 
     attempts = 0
-    max_attempts = 2              # intentos por ronda
-    extra_retry_used = False      # solo se permite una ronda extra
+    max_attempts = 2
+    extra_retry_used = False
+
+    # 1) Ir una sola vez al hub sobre el conveyor (entrada al ciclo)
+    movej(up_conv, v=50, a=25)
+
+    # 2) Calcular APPROACH, PICK y RETRACT (si no cambian, calcúlalos una vez)
+    a, _ = get_pick_app()
+    p, _ = get_pick()
+    r, _ = get_pick_ret()
 
     while True:
         attempts = attempts + 1
 
-        # 2) Ir al hub sobre el conveyor
-        movej(up_conv, vj_fast, aj_fast)
-
-        # 3) Calcular APPROACH, PICK y RETRACT
-        a, _ = get_pick_app()
-        p, _ = get_pick()
-        r, _ = get_pick_ret()
-
-        # 4) Bajar a APPROACH y luego a PICK
+        # 3) Ir a approach (desde donde estés: up_conv o retract)
         movej(a, v=vj_slow, a=aj_slow, ref=conv_frame)
-            # 1) Esperar conveyor listo
+
+        # 4) Esperar conveyor listo (antes de bajar a pick)
         wait_conveyor_ready()
+
+        # 5) Preparar tool weight vacío y bajar a pick
         set_tool("gripper_weight", 0.0, 0.2)
         movel(p, v=vl_slow, a=al_slow, ref=conv_frame)
 
-        # 5) Activar gripper según el modo
+        # 6) Activar gripper según el modo
         if mode == "full":
             grip_full()
         elif mode == "half_a":
@@ -1388,7 +1380,7 @@ def do_pick(mode):
         else:
             tp_log("Modo de pick desconocido: " + str(mode))
 
-        # 6) Esperar vacío OK (si está habilitado)
+        # 7) Esperar vacío OK
         if wait_vacuum_ok(mode, timeout=1.5):
             if mode == "full":
                 set_tool("full_weight", 0.0, 0.3)
@@ -1396,57 +1388,51 @@ def do_pick(mode):
                 set_tool("half_weight", 0.0, 0.3)
             wait(0.3)
 
-            # ÉXITO: subir y salir
+            # ÉXITO: retract y salida a up_conv
             movel(r, v=vl_slow, a=al_slow, ref=conv_frame)
             movej(up_conv, vj_fast, aj_fast)
 
-            # Avisar al PLC que este pick fue valido (hubo vacio)
-            plc_set_pick_vac_ok(True)
+            plc_set_stack_ack(True)
+            plc_set_vac_status(VAC_STATUS_OK)
+
             if attempts > 1:
                 tp_log("Pick recuperado en intento " + str(attempts) +
-                        " (modo=" + mode + ").")
+                       " (modo=" + mode + ").")
             return True
 
-        # 7) FALLO DE VACÍO en este intento
+        # 8) FALLO: NO subir a up_conv, solo retract y reintentar
         tp_log("Fallo de vacio en intento " + str(attempts) +
-                " (modo=" + mode + ").")
+               " (modo=" + mode + ").")
 
-        # Publish VACUUM LOST to the PLC (mutually exclusive with VACUUM OK)
-        plc_set_vacuum_loss(True)
+        plc_set_vac_status(VAC_STATUS_LOST)
 
-        # Soltar la caja en la posición de pick y subir
+        # Soltar en pick y retract (quedarte en zona segura cercana)
         rel_by_mode(mode)
         movel(r, v=vl_slow, a=al_slow, ref=conv_frame)
-        movej(up_conv, vj_fast, aj_fast)
 
-        # ¿Ya se terminaron los intentos de esta ronda?
+        # 9) Control de rondas (ciclado: siempre vuelve a preguntar)
         if attempts >= max_attempts:
-            # Si ya usamos la ronda extra, se va directo a mantenimiento
-            if extra_retry_used:
-                tp_log("Fallo de vacio tras reintento extra. Llamando a mantenimiento.")
-                # Keep VACUUM LOST ON when the pick fails and we are going to maintenance
-                plc_set_vacuum_loss(True)
-                go_to_maintenance_mode()
-                return False
+            # Reporta al PLC que hubo fallo de vacío (INT)
+            plc_set_vac_status(VAC_STATUS_LOST)
 
-            # Primera vez que fallan los max_attempts
             resp = ask_int_required("1 -->Reintentar \n2 -->Mantenimiento", 1, 2)
 
             if resp == 1:
-                tp_log("Operador eligio reintentar pick una vez mas.")
-                extra_retry_used = True
-                attempts = 0       # reseteamos contador para la nueva ronda
+                tp_log("Operador eligio reintentar pick.")
+                # opcional: al decidir reintentar, volvemos a IDLE para indicar 'reintentando'
+                plc_set_vac_status(VAC_STATUS_IDLE)
+                attempts = 0
                 continue
             else:
                 tp_log("Operador eligio llamar a mantenimiento tras fallo de vacio en pick.")
-                plc_set_vacuum_loss(True)
+                movej(up_conv, vj_mto, aj_mto)
                 go_to_maintenance_mode()
                 return False
 
-        # Si aún no se llegaron a los max_attempts de esta ronda,
-        # el while continua y se hace otro intento automáticamente.
         tp_log("Reintentando pick (intento " +
-                str(attempts + 1) + " de " + str(max_attempts) + ").")
+            str(attempts + 1) + " de " + str(max_attempts) + ").")
+
+
 
 # =====================================================================
 # Place (full / half)
@@ -1492,6 +1478,7 @@ def do_place(side, layer, slot, rtype):
     lost_vacuum = False
     if not has_vacuum_for_mode(rtype):
         lost_vacuum = True
+        plc_set_vac_status(VAC_STATUS_LOST)
         tp_log("Perdida de vacio detectada ANTES de place. side=" +
                 side + " layer=" + str(layer + 1) +
                 " slot=" + str(slot + 1) +
@@ -1522,7 +1509,10 @@ def do_place(side, layer, slot, rtype):
 
     apply_tool_weight_after_place(rtype, lost_vacuum)
 
-    plc_set_pick_vac_ok(False)  # tras el place, no hay vacío
+    if not lost_vacuum:
+        plc_set_vac_status(VAC_STATUS_IDLE)
+
+
 
     movel(rt, v=vl_slow, a=al_slow, ref=rr)
 
@@ -1533,27 +1523,30 @@ def do_place(side, layer, slot, rtype):
     if not lost_vacuum:
         return True
 
-    # 5) Si hubo pérdida de vacío ANTES de place:
-    #    ya estamos en el hub; ahora se le pregunta al operador qué hacer.
-    plc_set_vacuum_loss(1)
+    plc_set_vac_status(VAC_STATUS_LOST)
 
+    # 5) Si hubo pérdida de vacío ANTES de place:
+    # ya estamos en el hub; ahora se le pregunta al operador qué hacer.
     resp = ask_int_required("1=Continuar paletizado \n2=Llamar mantenimiento", 1, 2)
 
     if resp == 1:
         tp_log("Operador eligio CONTINUAR tras perdida de vacio en place. "
                 "Se considerara este place como COMPLETADO.")
-        plc_set_vacuum_loss(0)
+        plc_set_vac_status(VAC_STATUS_IDLE)
 
         # Muy importante:
         # Este flag permite que la lógica externa (Half, etc.) sepa que
         # hubo pérdida de vacío pero el operador decidió continuar.
         _last_place_lost_vacuum = True
         return True
+
     else:
         tp_log("Operador eligio llamar a mantenimiento tras perdida de vacio en place.")
+        plc_set_vac_status(VAC_STATUS_LOST)
+        plc_set_stack_ack(False)
         go_to_maintenance_mode()
-        plc_set_pick_vac_ok(False)
         return False
+
 
 # =====================================================================
 # Lógica Half-A / Half-B
@@ -1662,14 +1655,6 @@ def do_half(side, layer, slot, is_half, dl, ds):
 # tp helpers (Teach Pendant)
 # =====================================================================
 
-def clamp(val, lo, hi):
-    """
-    Limita el valor 'val' al rango [lo, hi].
-    """
-    if val < lo: return lo
-    if val > hi: return hi
-    return val
-
 def ask_int_required(prompt, lo, hi):
     """
     Pide un entero entre [lo, hi] y NO deja continuar hasta que el operador
@@ -1686,19 +1671,6 @@ def ask_int_required(prompt, lo, hi):
         tp_popup(msg, DR_PM_WARNING)
         tp_log("ask_int_required: valor fuera de rango (" + str(v) + "). Reintentando...")
 
-def ask_str_required(prompt):
-    """
-    Pide un string NO vacío. Repite hasta que el operador escriba algo.
-    """
-    while True:
-        s = tp_get_user_input(prompt, DR_VAR_STR)
-
-        # En Doosan normalmente no hay None, pero por seguridad lo tratamos igual
-        if (s is not None) and (s != ""):
-            return s
-
-        tp_popup("Entrada vacia. Por favor ingrese un texto.", DR_PM_WARNING)
-        tp_log("ask_str_required: string vacio. Reintentando...")
 
 # ===================== SYSTEM PERSISTENT VARIABLES =====================
 # Variables persistentes en el controlador (prefijo System_)
@@ -1727,19 +1699,6 @@ def system_update_progress(side, layer, slot):
 
         tp_log("System progress -> side=" + str(side) + " layer=" + str(layer) + " slot=" + str(slot))
 
-def system_reset_progress(side):
-    """Resetea el progreso persistente del lado indicado a inicio (L1 S1 -> 0-based 0,0)."""
-    global System_Side, System_Layer_L, System_Slot_L, System_Layer_R, System_Slot_R
-
-    System_Side = side
-    if side == "L":
-        System_Layer_L = 0
-        System_Slot_L  = 0
-    else:
-        System_Layer_R = 0
-        System_Slot_R  = 0
-
-    tp_log("System reset -> side=" + str(side) + " layer=0 slot=0")
 
 def warn_if_starting_before_last(side, layer, slot):
     """
@@ -1822,6 +1781,16 @@ def get_configured_start_side():
         return "L"
     return "R"
 
+def get_start_side_with_resume_priority():
+    try:
+        s = str(System_Side).strip().upper()
+        if s == "L" or s == "R":
+            return s
+    except:
+        pass
+    return get_configured_start_side()
+
+
 def ask_main_operation():
     """
     Popup inicial del programa (nuevo flujo):
@@ -1843,30 +1812,22 @@ _left_cx  =  250.0
 _right_cx = -1266.0
 _conv_cx = 0.00
 
-def _pal_hub(cx):
-    """
-    Selecciona el hub (up_left o up_right) más cercano según la X actual (cx).
-    """
-    if abs(cx - _left_cx) <= abs(cx - _right_cx):
+
+_left_j1 = up_left[0]
+_right_j1 = up_right[0]
+_conv_j1 = up_conv[0]
+
+def _nearest_hub_by_j1(j1):
+    d_left  = abs(j1 - _left_j1)
+    d_right = abs(j1 - _right_j1)
+    d_conv  = abs(j1 - _conv_j1)
+
+    if d_left <= d_right and d_left <= d_conv:
         return up_left
-    else:
+    elif d_right <= d_left and d_right <= d_conv:
         return up_right
-
-def _nearest_hub_by_x(cx):
-    """
-    Devuelve el hub (up_left / up_right / up_conv) cuya X-centro
-    esté más cercana a la X actual del robot.
-    """
-    dL = abs(cx - _left_cx)
-    dR = abs(cx - _right_cx)
-    dC = abs(cx - _conv_cx)
-
-    if dC <= dL and dC <= dR:
+    else:
         return up_conv
-    elif dL <= dR:
-        return up_left
-    else:
-        return up_right
 
 def _get_posx_only():
     """
@@ -1935,7 +1896,7 @@ def safe_home():
         return
 
     if _is_safe_pose():
-        movej(home, v=vj_slow, a=aj_slow)
+        movej(home, v=vj_mto, a=aj_mto)
         return
 
     # Obtener pose cartesiana actual
@@ -1948,7 +1909,8 @@ def safe_home():
     movel(pz, time=2, ref=DR_BASE, mod=DR_MV_MOD_REL)
 
     # Elegir ruta segura según la Y actual (sobre pallets o sobre conveyor)
-    hub = _nearest_hub_by_x(cx)
+    curj = _get_posj_only()
+    hub = _nearest_hub_by_j1(curj[0])
     movej(hub, v=vj_slow, a=aj_slow)
 
     # Finalmente ir a home
@@ -1972,14 +1934,20 @@ def go_to_maintenance_mode():
         - Lleva al robot a la pose de mantenimiento.
         - Detiene el programa.
     """
-    global _in_maintenance
+    global _in_maintenance, System_InMaintenance
+    _in_maintenance = True
+    System_InMaintenance = 1
+
     set_tool("gripper_weight", 0.0, 0.2)
     rel_full()
+
     # Enter/lock maintenance immediately (clear other transient outputs)
     plc_enter_maintenance()
+
     # Al entrar a mantenimiento, NO queremos estados transitorios activos
-    plc_set_pick_vac_ok(False)
-    plc_set_vacuum_loss(False)
+    plc_set_stack_ack(False)
+    plc_set_pick_mode("idle")
+
 
     # 1) Pedir contraseña en bucle hasta que sea correcta
     while True:
@@ -1991,6 +1959,7 @@ def go_to_maintenance_mode():
 
         tp_popup("Contrasena incorrecta. Intente de nuevo.", DR_PM_ALARM)
         tp_log("Contrasena de mantenimiento incorrecta. Reintentando...")
+
     # 2) Verificar pallets presentes
     if is_pallet_present("L") or is_pallet_present("R"):
         tp_popup("Retire ambas tarimas antes de mantenimiento.", DR_PM_WARNING)
@@ -2006,11 +1975,13 @@ def go_to_maintenance_mode():
 
     # 4) Bajar lifter y restaurar frames (nivel 0)
     lifter_restore_frames()
+
     # 5) Llevar al robot a la pose de mantenimiento
     movej(maint_safe_pose, v=vj_mto, a=aj_mto)
 
     tp_log("Robot en pose de mantenimiento. Programa detenido.")
     stop(DR_QSTOP)
+
 
 # =====================================================================
 def finish_side(side):
@@ -2030,7 +2001,6 @@ def finish_side(side):
     go_safe_before_lifter()
 
     plc_set_robot_state(ROBOT_STATE_MANUAL)
-    tp_popup("Retire la tarima terminada.", DR_PM_MESSAGE)
     wait_remove_finished_pallet(side)
 
     lifter_restore_frames()
@@ -2040,6 +2010,31 @@ def finish_side(side):
 # =====================================================================
 # PROGRESO: reset de variables de sistema por lado (solo cuando un lado termina)
 # =====================================================================
+
+# =====================================================================
+# PENDING PALLET REMOVAL LATCH (persistente por lado)
+# - Evita el caso: lado terminado -> reset progreso -> operador NO retira tarima -> reinicio -> lifter puede bajar.
+# - System_PendingPalletRemoval_L/R deben existir como variables de sistema (int 0/1) en el controlador.
+#   0 = no pendiente, 1 = pendiente de retirar tarima y confirmar con PLC.
+# =====================================================================
+def get_pending_pallet_removal(side):
+    """Devuelve 1 si ese lado tiene tarima terminada pendiente de retiro; si no existe la variable, asume 0."""
+    try:
+        if side == "L":
+            return 1 if (System_PendingPalletRemoval_L == 1) else 0
+        else:
+            return 1 if (System_PendingPalletRemoval_R == 1) else 0
+    except:
+        return 0
+
+def set_pending_pallet_removal(side, val):
+    """Setea latch persistente de retiro de tarima (0/1). Requiere variables de sistema creadas en el controlador."""
+    global System_PendingPalletRemoval_L, System_PendingPalletRemoval_R
+    if side == "L":
+        System_PendingPalletRemoval_L = (1 if val else 0)
+    else:
+        System_PendingPalletRemoval_R = (1 if val else 0)
+
 def reset_side_progress(side):
     """Resetear SOLO el progreso persistente del lado indicado a (0,0) 0-based."""
     global System_Layer_L, System_Slot_L, System_Layer_R, System_Slot_R
@@ -2052,9 +2047,18 @@ def reset_side_progress(side):
         System_Slot_R  = 0
 
 def complete_side(side):
-    """Finalizar lado + reset de progreso persistente de ese lado."""
-    finish_side(side)
+    """
+    Finalizar lado de forma robusta ante paros/reinicios:
+    Nota: Si el programa se detiene en cualquier punto después de (1) y antes de limpiar el latch,
+    al reiniciar main() obligará a confirmar retiro de tarima antes de permitir bajadas del lifter.
+    """
+    global _in_maintenance
+    set_pending_pallet_removal(side, 1)
     reset_side_progress(side)
+    finish_side(side)
+    # Si finish_side fue omitido por mantenimiento, NO limpiamos el latch (más seguro).
+    if not _in_maintenance:
+        set_pending_pallet_removal(side, 0)
 
 # =====================================================================
 # rutina: ejecutar desde (layer,slot) hasta acabar el lado
@@ -2188,7 +2192,6 @@ def run_side_once(side, layer, slot):
     # Asegurar pallet presente en el lado seleccionado
     if not is_pallet_present(side):
         tp_log("No hay tarima en el lado " + side + ". Esperando a que la coloquen...")
-        tp_popup("No hay tarima esperando a que la coloquen...", DR_PM_MESSAGE)
         wait_pallet_present(side)
 
     n_layers = len(layers)
@@ -2212,7 +2215,9 @@ def run_side_once(side, layer, slot):
             return False
 
         # Colocar Half-B en ese slot
-        ok2 = do_place(side, layer, slot, "half_b")
+        place_rtype = "half_b" if side == "L" else "half_a"
+        ok2 = do_place(side, layer, slot, place_rtype)
+
         if not ok2:
             tp_log("run_side_once: mantenimiento solicitado en ultima caja (arranque especial).")
             finish_side(side)
@@ -2241,7 +2246,9 @@ def run_side_once(side, layer, slot):
             return False
 
         # Colocar Half-B en este slot
-        ok2 = do_place(side, layer, slot, "half_b")
+        place_rtype = "half_b" if side == "L" else "half_a"
+        ok2 = do_place(side, layer, slot, place_rtype)
+
         if not ok2:
             tp_log("run_side_once: mantenimiento solicitado al colocar Half-B inicial.")
             finish_side(side)
@@ -2332,8 +2339,6 @@ def main():
     else:
         plc_set_robot_state(ROBOT_STATE_STANDBY)
         plc_set_maintenance_state(False)
-        plc_set_pick_vac_ok(False)
-        plc_set_vacuum_loss(False)
         plc_set_pick_mode("idle")
 
     # ----------------- Recuperacion tras mantenimiento ------------
@@ -2346,41 +2351,80 @@ def main():
         if not _is_safe_pose():
             movej(safe_pose, v=vj_mto, a=aj_mto)
 
-        movej(home, v=vj_slow, a=aj_slow)
+        movej(home, v=vj_mto, a=aj_mto)
 
         # Limpiar latch de mantenimiento y continuar flujo normal
         plc_exit_maintenance()
-        System_InMaintenance = 0
-        _in_maintenance = False
 
         # (Opcional) Si tu proceso requiere quedar siempre en home seguro:
         # safe_home()
 
-    else:
-        # Arranque normal: usar Home Seguro
-        safe_home()
+    # ------------------------------------------------------------
+    # ARRANQUE NORMAL (SE EJECUTA SIEMPRE):
+    # 1) Resolver Lift100 (init desde safe_pose y restore si hay progreso)
+    # 2) Sincronizar frames por posición real
+    # 3) Luego Home Seguro
+    # ------------------------------------------------------------
 
-        # ----------------- Lifter init + sincronizacion frames --------
-        # Caso especial: si NO es seguro inicializar (por progreso alto en ambos lados),
-        # secuencia segura:
-        #   1) safe_pose
-        #   2) init lifter (baja a 0)
-        #   3) re-subir lifter al nivel que corresponde según progreso
-        #   4) home
-        if or_lift.isconn() and (not or_lift.isInit()) and (not lifter_init_is_safe_by_progress()):
-            tp_log("Init Lift100 NO seguro por progreso alto. Secuencia: safe_pose -> init -> re-subir nivel -> home.")
+    # ----------------- PENDING PALLET REMOVAL (anti-paros) --------
+    # Si un lado terminó y se reseteó progreso, pero NO se confirmó retiro de tarima,
+    # este latch obliga a confirmar retiro ANTES de permitir cualquier bajada/init del lifter.
+    pend_L = get_pending_pallet_removal("L")
+    pend_R = get_pending_pallet_removal("R")
+    if (pend_L == 1) or (pend_R == 1):
+        tp_log("Detectado PENDING PALLET REMOVAL (L=" + str(pend_L) + ", R=" + str(pend_R) + ").")
+        tp_log("Se requiere confirmar retiro de tarima(s) antes de continuar.")
 
-            # 1) Ir a safe_pose antes de inicializar
-            if not _is_safe_pose():
-                movej(safe_pose, v=vj_mto, a=aj_mto)
+        # Ir a safe_pose antes de solicitar retiro / mover lifter
+        if not _is_safe_pose():
+            movej(safe_pose, v=vj_mto, a=aj_mto)
 
-            # 2) Inicializar (referenciar) lifter
-            tp_log("Inicializando Lift100 desde safe_pose...")
-            or_lift.init()
-            lifter_wait_ready()
-            lifter_check_error()
+        plc_set_robot_state(ROBOT_STATE_MANUAL)
 
-            # 3) Determinar nivel objetivo según el progreso guardado (camas actuales)
+        if pend_L == 1:
+            wait_remove_finished_pallet("L")
+        if pend_R == 1:
+            wait_remove_finished_pallet("R")
+
+        # Con tarima(s) retiradas, restaurar lifter/frames a nivel 0
+        lifter_restore_frames()
+
+        plc_set_robot_state(ROBOT_STATE_STANDBY)
+
+        # Limpiar latches (ya confirmado retiro)
+        if pend_L == 1:
+            set_pending_pallet_removal("L", 0)
+        if pend_R == 1:
+            set_pending_pallet_removal("R", 0)
+
+    # ----------------- Lifter init + sincronizacion frames --------
+    # Regla: si Lift100 NO está inicializado, SIEMPRE inicializar desde safe_pose.
+    # Si hay progreso guardado, después de init re-subir al nivel correspondiente.
+    if or_lift.isconn() and (not or_lift.isInit()):
+        tp_log("Lift100 NO inicializado. Secuencia segura: safe_pose -> init -> (re-subir si hay progreso) -> continuar.")
+
+        # 1) Ir a safe_pose antes de inicializar
+        if not _is_safe_pose():
+            movej(safe_pose, v=vj_mto, a=aj_mto)
+
+        # 2) Inicializar (referenciar) lifter
+        tp_log("Inicializando Lift100 desde safe_pose...")
+        or_lift.init()
+    if not lifter_wait_ready():
+        tp_popup("ERROR LIFTER: Timeout en init().\nPrograma detenido.", DR_PM_ALARM)
+        stop(DR_QSTOP)
+        return
+
+    if not (lifter_check_error() == 0):
+        tp_popup("ERROR LIFTER: Error tras init().\nPrograma detenido.", DR_PM_ALARM)
+        stop(DR_QSTOP)
+        return
+
+        lifter_wait_ready()
+        lifter_check_error()
+
+        # 3) Si hay progreso guardado: re-subir al nivel que corresponde
+        if not lifter_init_is_safe_by_progress():
             try:
                 l_layer = (System_Layer_L if (System_Layer_L is not None) else 0)
                 r_layer = (System_Layer_R if (System_Layer_R is not None) else 0)
@@ -2388,53 +2432,58 @@ def main():
                 l_layer = 0
                 r_layer = 0
 
-            tgt_layer = (l_layer if (l_layer >= r_layer) else r_layer)
+            tgt_layer = (l_layer if l_layer >= r_layer else r_layer)
+
+            # Clamp de seguridad (layers 0..8, 0-based)
+            if tgt_layer < 0:
+                tgt_layer = 0
+            elif tgt_layer > 8:
+                tgt_layer = 8
+
             tgt_level = lifter_level_for_layer(tgt_layer)
 
             tp_log("Re-subiendo Lift100 a nivel " + str(tgt_level) +
-                    " segun progreso (L=" + str(l_layer) + ", R=" + str(r_layer) + ").")
+                   " segun progreso (L=" + str(l_layer) + ", R=" + str(r_layer) + ").")
 
-            # Mover físicamente + sincronizar frames
-            _lifter_do_set_level(tgt_level)
+            if not _lifter_do_set_level(tgt_level):
+                tp_popup("ERROR LIFTER: No se pudo re-subir al nivel guardado.\nPrograma detenido.", DR_PM_ALARM)
+                stop(DR_QSTOP)
+                return
             _lifter_level = tgt_level
             apply_level_to_frames(tgt_level)
 
-            # 4) Ir a Home ya con el lifter en su nivel correcto
-            safe_home()
+    # 4) Sincronizar frames por posición real (si está conectado)
+    if or_lift.isconn():
+        pos = or_lift.get_pos()
+        level_actual = lifter_level_from_pos(pos)
+        tp_log("Lift100 detectado en pos=" + str(pos) +
+               " mm, nivel logico estimado=" + str(level_actual))
+    else:
+        tp_log("Lift100 no conectado al inicio: se asume nivel 0.")
+        level_actual = 0
 
-        else:
-            # Flujo normal: init si hace falta y luego sincronizar frames por posición real
-            lifter_safe_init()
-
-            if or_lift.isconn():
-                pos = or_lift.get_pos()
-                level_actual = lifter_level_from_pos(pos)
-                tp_log("Lift100 detectado en pos=" + str(pos) +
-                        " mm, nivel logico estimado=" + str(level_actual))
-            else:
-                tp_log("Lift100 no conectado al inicio: se asume nivel 0.")
-                level_actual = 0
-
-            _lifter_level = level_actual
-            apply_level_to_frames(level_actual)
+    _lifter_level = level_actual
+    apply_level_to_frames(level_actual)
 
     # ============================================================
     # GATE DEL LIFTER (ANTES DEL PRE-MENU y ANTES DEL MENU)
     # - Si lifter no está OK (conectado/init/sin error/pos OK), NO avanza.
     # ============================================================
     if not lifter_gate_or_stop():
+        stop(DR_QSTOP)
         return
+
+    # 5) Ahora sí: Home Seguro
+    safe_home()
+
 
     # ============================
     # PRE-MENU: ajustar lifter según progreso guardado
     # (SIN try/except pass; si falla, debe detenerse y NO mostrar menú)
     # ============================
-    # Sincroniza nivel lógico con posición REAL
     pos = or_lift.get_pos()
     _lifter_level = lifter_level_from_pos(pos)
 
-    # Calcula capa “más alta” guardada (la que manda la altura necesaria)
-    # (manejo defensivo por si alguna es None)
     try:
         l_layer = (System_Layer_L if (System_Layer_L is not None) else 0)
         r_layer = (System_Layer_R if (System_Layer_R is not None) else 0)
@@ -2445,85 +2494,98 @@ def main():
     saved_layer = (l_layer if (l_layer >= r_layer) else r_layer)
     target_level = lifter_level_for_layer(saved_layer)
 
-    # Si hace falta, mueve lifter a ese nivel ANTES del menú
     if target_level != _lifter_level:
-        # Recomendado: robot a safe_pose antes de mover lifter
         if not _is_safe_pose():
             movej(safe_pose, v=vj_mto, a=aj_mto)
 
-        lifter_set_level("L", target_level)  # usa tu función existente (mueve lifter + frames)
-        safe_home()  # regresa a home ya con lifter correcto
-
-        # re-sincroniza variable local
+        lifter_set_level("L", target_level)
+        safe_home()
         _lifter_level = target_level
 
     # ----------------- Menu principal -----------------------------
+    op = ask_main_operation()
+
+    if op == 2:
+        go_to_maintenance_mode()
+        return
+
+    tp_log("Operacion seleccionada: PALETIZAR (ciclo continuo L/R).")
+
+    # Selección inicial SOLO una vez (para arrancar o reanudar un pallet)
+    start_side = get_start_side_with_resume_priority()
+    layer = ask_layer(start_side)
+    slot  = ask_slot(start_side, layer)
+
+    while not warn_if_starting_before_last(start_side, layer, slot):
+        layer = ask_layer(start_side)
+        slot  = ask_slot(start_side, layer)
+
+    # Guardar progreso inicial seleccionado
+    system_update_progress(start_side, layer, slot)
+
+    other_side = "R" if start_side == "L" else "L"
+
+    plc_set_robot_state(ROBOT_STATE_NORMAL)
+    tp_log("Inicio en " + start_side +
+            " L" + str(layer+1) +
+            " S" + str(slot+1) +
+            ". Entrando a ciclo infinito: " + start_side + " -> " + other_side + ".")
+
+    # ============================================================
+    # CICLO INFINITO
+    # - NO vuelve a preguntar 'Paletizar/Mantenimiento'
+    # - Ejecuta un lado completo, luego el otro, indefinidamente
+    # - Entre ciclos, espera tarimas presentes (nuevas tarimas) según PLC/sensores
+    # ============================================================
+
+    order = [start_side, other_side]
+
     while True:
-        op = ask_main_operation()
+        for side in order:
+            if _in_maintenance:
+                tp_log("Modo mantenimiento activo. Saliendo del ciclo continuo.")
+                return
 
-        if op == 2:
-            go_to_maintenance_mode()
-            return
+            # Asegurar tarima presente antes de iniciar el lado
+            if not is_pallet_present(side):
+                tp_log("No hay tarima en el lado " + side + ". Esperando a que la coloquen...")
+                wait_pallet_present(side)
 
-        # ----------------- PALETIZAR (ambos lados) --------------------
-        tp_log("Operacion seleccionada: PALETIZAR (ambos lados).")
+            # Recuperar progreso persistido del lado
+            try:
+                if side == "L":
+                    layer = (System_Layer_L if (System_Layer_L is not None) else 0)
+                    slot  = (System_Slot_L  if (System_Slot_L  is not None) else 0)
+                else:
+                    layer = (System_Layer_R if (System_Layer_R is not None) else 0)
+                    slot  = (System_Slot_R  if (System_Slot_R  is not None) else 0)
+            except:
+                layer = 0
+                slot  = 0
 
-        start_side = get_configured_start_side()   # 'L' o 'R'
-        layer = ask_layer(start_side)              # 0-based
-        slot  = ask_slot(start_side, layer)        # 0-based
+            system_update_progress(side, layer, slot)
 
-        while not warn_if_starting_before_last(start_side, layer, slot):
-            layer = ask_layer(start_side)
-            slot  = ask_slot(start_side, layer)
+            tp_log("Iniciando lado " + side + " desde L" + str(layer+1) + " S" + str(slot+1) + ".")
+            plc_set_robot_state(ROBOT_STATE_NORMAL)
 
-        system_update_progress(start_side, layer, slot)
+            ok = run_side_once(side, layer, slot)
 
-        plc_set_robot_state(ROBOT_STATE_NORMAL)
+            if (not ok) or _in_maintenance:
+                tp_log("Abortando ciclo continuo (fallo o mantenimiento) en lado " + side + ".")
+                return
 
-        tp_log("Inicio en " + start_side +
-                " L" + str(layer+1) +
-                " S" + str(slot+1))
-
-        other_side = "R" if start_side == "L" else "L"
-        plc_set_robot_state(ROBOT_STATE_NORMAL)
-        ok_first = run_side_once(start_side, layer, slot)
-
-        # Si hubo fallo (p.ej. vacío) o se activó mantenimiento, no seguimos al otro lado
-        if (not ok_first) or _in_maintenance:
-            tp_log("Abortando despues del primer lado (fallo o mantenimiento).")
-            return
-
-        # Si se activo mantenimiento en el primer lado, no seguimos
-        if _in_maintenance:
-            tp_log("Modo mantenimiento activo tras primer lado. No se paletiza el otro lado.")
-            return
-
-        if not is_pallet_present(other_side):
-            tp_log("No hay tarima en el lado " + other_side + ". Esperando a que la coloquen...")
-            tp_popup("Coloque tarima para continuar.", DR_PM_MESSAGE)
-            wait_pallet_present(other_side)
-
-        tp_log("Iniciando lado " + other_side + " desde L1 S1.")
-        plc_set_robot_state(ROBOT_STATE_NORMAL)
-        run_from(other_side, 0, 0)
-
-        if _in_maintenance:
-            tp_log("Modo mantenimiento activo durante el segundo lado. Saliendo sin finish_side.")
-            return
-
-        complete_side(other_side)
-
+        # Fin de ambos lados -> regresar a home y quedar en IDLE, pero CONTINUAR ciclo
         if not _in_maintenance:
             movej(home, v=vj_slow, a=aj_slow)
             plc_set_robot_state(ROBOT_STATE_IDLE)
             plc_vacuum_idle()
             plc_set_pick_mode("idle")
-
-            # Ambos lados terminados: volver automaticamente al menu principal
+            # Loop continua (esperará nuevas tarimas en cada lado)
             continue
-
         else:
             tp_log("Modo mantenimiento activo. No se regresa a home.")
             return
+
+
 # Llamada al MAIN para iniciar el flujo cuando se ejecuta el script.
 main()
